@@ -54,6 +54,8 @@ jobs:
 
           python3 builder/scripts/apply_diag_patch.py \
             idevice/ffi/src/tunnel_provider.rs
+          python3 builder/scripts/apply_multipath_dynamic_diag.py \
+            idevice/ffi/src/tunnel_provider.rs
 
           python3 builder/scripts/apply_emproxy_diag.py \
             em_proxy/src/lib.rs
@@ -68,6 +70,9 @@ jobs:
             minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
 
           grep -q 'SS-DIAG' idevice/ffi/src/tunnel_provider.rs
+          grep -q 'SS-MPATH' idevice/ffi/src/tunnel_provider.rs
+          grep -q 'utun-local-10.7.0.10' idevice/ffi/src/tunnel_provider.rs
+          grep -q 'loopback-127.0.0.1' idevice/ffi/src/tunnel_provider.rs
           grep -q 'EMP-DIAG' em_proxy/src/lib.rs
           grep -q 'log_ipv4_tcp("RX-DECAP", b);' em_proxy/src/lib.rs
           grep -q 'log_ipv4_tcp("TX-REFLECT", b);' em_proxy/src/lib.rs
@@ -137,8 +142,6 @@ jobs:
           set -euo pipefail
           rustup target add aarch64-apple-ios
 
-      # EMProxy is the smaller and less-proven patched component. Build it first
-      # so an iOS-specific failure does not waste several minutes compiling IDevice.
       - name: Apply EMProxy TCP packet diagnostic patch
         run: |
           set -euo pipefail
@@ -179,11 +182,14 @@ jobs:
           fi
           bindgen --version
 
-      - name: Apply IDevice dynamic-tunnel diagnostic patch
+      - name: Apply IDevice dynamic-tunnel + multipath patch
         run: |
           set -euo pipefail
           python3 builder/scripts/apply_diag_patch.py idevice/ffi/src/tunnel_provider.rs
-          grep -n "SS-DIAG" idevice/ffi/src/tunnel_provider.rs
+          python3 builder/scripts/apply_multipath_dynamic_diag.py idevice/ffi/src/tunnel_provider.rs
+          grep -n "SS-DIAG\|SS-MPATH" idevice/ffi/src/tunnel_provider.rs
+          grep -n 'utun-local-10.7.0.10' idevice/ffi/src/tunnel_provider.rs
+          grep -n 'loopback-127.0.0.1' idevice/ffi/src/tunnel_provider.rs
 
       - name: Build iOS arm64 IDevice XCFramework
         working-directory: idevice
@@ -391,7 +397,7 @@ jobs:
       - name: Upload diagnostic IPA
         uses: actions/upload-artifact@v4
         with:
-          name: SideStore-dynamic-tunnel-packet-diag
+          name: SideStore-dynamic-tunnel-multipath-diag
           path: SideStore/SideStore.ipa
           if-no-files-found: error
 
@@ -399,6 +405,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SideStore-dynamic-tunnel-packet-diag-build-logs
+          name: SideStore-dynamic-tunnel-multipath-diag-build-logs
           path: SideStore/build/logs
           if-no-files-found: ignore
