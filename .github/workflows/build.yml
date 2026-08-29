@@ -1,0 +1,118 @@
+name: Build SideStore Dynamic-Tunnel Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout diagnostic builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Checkout SideStore idevice
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: 61c2704
+          submodules: recursive
+          path: idevice
+
+      - name: Apply diagnostic retry patch
+        run: |
+          git -C idevice apply "$GITHUB_WORKSPACE/builder/patches/tunnel_retry_diag.patch"
+          grep -n "SS-DIAG" idevice/ffi/src/tunnel_provider.rs
+
+      - name: Setup Xcode 26.4
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
+      - name: Install build tools
+        run: |
+          brew install just ldid xcbeautify
+          rustup target add aarch64-apple-ios
+          rustup target add aarch64-apple-ios-sim
+          rustup target add aarch64-apple-tvos
+          rustup target add aarch64-apple-tvos-sim
+          rustup target add aarch64-apple-darwin
+          cargo install --force --locked bindgen-cli
+
+      - name: Build patched IDevice XCFramework
+        working-directory: idevice
+        run: |
+          just xcframework
+          test -d swift/IDevice.xcframework
+          test -f swift/bundle.zip
+
+      - name: Checkout exact SideStore Nightly source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/SideStore
+          ref: f3a18d61efae65b05dc935fff75b89225efdb0ff
+          submodules: recursive
+          fetch-depth: 0
+          path: SideStore
+
+      - name: Inject patched IDevice into minimuxer
+        run: |
+          mkdir -p SideStore/Dependencies/minimuxer/DeviceGateway/LocalBinary
+          cp -R idevice/swift/IDevice.xcframework SideStore/Dependencies/minimuxer/DeviceGateway/LocalBinary/IDevice.xcframework
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("SideStore/Dependencies/minimuxer/DeviceGateway/Package.swift")
+          s = p.read_text()
+
+          pattern = re.compile(
+              r'(?ms)\s*\.binaryTarget\(\s*'
+              r'name:\s*"IDevice",\s*'
+              r'url:\s*"https://github\.com/SideStore/idevice/releases/download/[^"]+",\s*'
+              r'checksum:\s*"[0-9a-f]+"\s*'
+              r'\),'
+          )
+
+          replacement = "\n             .binaryTarget(\n                 name: \"IDevice\",\n                 path: \"LocalBinary/IDevice.xcframework\"\n             ),"
+
+          s2, n = pattern.subn(replacement, s, count=1)
+          if n != 1:
+              raise SystemExit("Could not replace remote IDevice binaryTarget")
+
+          p.write_text(s2)
+          print("Patched Package.swift to use local diagnostic IDevice XCFramework")
+          PY
+
+          grep -n -A4 -B2 'name: "IDevice"' SideStore/Dependencies/minimuxer/DeviceGateway/Package.swift
+
+      - name: Build diagnostic SideStore IPA
+        working-directory: SideStore
+        run: |
+          python3 scripts/ci/workflow.py build
+
+      - name: Verify IPA exists
+        run: |
+          test -f SideStore/SideStore.ipa
+          ls -lh SideStore/SideStore.ipa
+
+      - name: Upload diagnostic IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-dynamic-tunnel-diag
+          path: SideStore/SideStore.ipa
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-dynamic-tunnel-diag-build-logs
+          path: SideStore/build/logs
+          if-no-files-found: ignore
