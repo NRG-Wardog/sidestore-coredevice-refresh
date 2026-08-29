@@ -2,9 +2,6 @@ name: Build SideStore Dynamic-Tunnel Diagnostic
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
