@@ -190,6 +190,12 @@ jobs:
           grep -n -A4 -B1 'name: "OpenSSL"' SideStore/Dependencies/minimuxer/DeviceGateway/Package.swift
           grep -n -A4 -B1 'name: "EMProxy"' SideStore/Dependencies/minimuxer/Package.swift
 
+      - name: Apply DeviceGateway downstream diagnostics
+        run: |
+          python3 builder/scripts/apply_gateway_diag.py \
+            SideStore/Dependencies/minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          grep -n "GW-DIAG" SideStore/Dependencies/minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+
       - name: Resolve Swift packages with clean artifact cache
         working-directory: SideStore
         run: |
