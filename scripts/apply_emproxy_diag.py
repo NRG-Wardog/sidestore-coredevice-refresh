@@ -10,11 +10,11 @@ s = p.read_text()
 
 if "[EMP-DIAG] packet diagnostic build active" in s:
     required_existing = [
-        'log_ipv4_summary("RX-DECAP", b);',
-        'log_ipv4_summary("TX-REFLECT", b);',
+        'log_ipv4_tcp("RX-DECAP", b);',
+        'log_ipv4_tcp("TX-REFLECT", b);',
         "[EMP-DIAG] WireGuard UDP endpoint changed",
         "[EMP-DIAG] Decapsulation error",
-        "[EMP-DIAG] reflected IPv4 packet",
+        "interesting_flags",
     ]
     missing = [x for x in required_existing if x not in s]
     if missing:
@@ -57,6 +57,14 @@ fn log_ipv4_tcp(stage: &str, packet: &[u8]) {
         0
     };
 
+    // Packet-level logging can itself perturb a loopback timing bug. We only
+    // record TCP control transitions needed to distinguish SYN reflection,
+    // SYN-ACK, RST and teardown. TLS/RSD progress is logged by SS-DIAG.
+    let interesting_flags = flags & (0x02 | 0x04 | 0x01) != 0; // SYN | RST | FIN
+    if !interesting_flags {
+        return;
+    }
+
     let mut names = Vec::new();
     if flags & 0x02 != 0 { names.push("SYN"); }
     if flags & 0x10 != 0 { names.push("ACK"); }
@@ -66,8 +74,8 @@ fn log_ipv4_tcp(stage: &str, packet: &[u8]) {
     if flags & 0x20 != 0 { names.push("URG"); }
     if names.is_empty() { names.push("NONE"); }
 
-    // Level 2 is routed to debugLog by Minimuxer, so packet diagnostics are
-    // retained even when verbose logging is disabled.
+    // Level 2 is routed to debugLog by Minimuxer, so diagnostics are retained
+    // even when verbose logging is disabled.
     log_msg(
         2,
         format!(
@@ -77,29 +85,6 @@ fn log_ipv4_tcp(stage: &str, packet: &[u8]) {
             packet.len()
         ),
     );
-}
-
-fn log_ipv4_summary(stage: &str, packet: &[u8]) {
-    if packet.len() < 20 || (packet[0] >> 4) != 4 {
-        return;
-    }
-
-    let src = std::net::Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]);
-    let dst = std::net::Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]);
-    let proto = packet[9];
-
-    if proto == 6 {
-        log_ipv4_tcp(stage, packet);
-    } else {
-        log_msg(
-            2,
-            format!(
-                "[EMP-DIAG] {stage} IPv4 {src} -> {dst} proto={} bytes={}",
-                proto,
-                packet.len()
-            ),
-        );
-    }
 }
 
 '''
@@ -122,7 +107,6 @@ loop_new = """    let join_handle = std::thread::spawn(move || {
         let mut ready = false;
         let mut last_endpoint: Option<std::net::SocketAddr> = None;
         let mut udp_rx_packets: u64 = 0;
-        let mut reflected_ipv4_packets: u64 = 0;
         loop {"""
 if loop_old not in s:
     raise SystemExit("Could not locate EMProxy worker loop")
@@ -202,15 +186,16 @@ s = s.replace(err_old, err_new, 1)
 wtn_old = """                        boringtun::noise::TunnResult::WriteToNetwork(b) => {
                             if let Err(e) = socket.send_to(b, endpoint) {"""
 wtn_new = """                        boringtun::noise::TunnResult::WriteToNetwork(b) => {
-                            log_msg(
-                                2,
-                                format!(
-                                    "[EMP-DIAG] WireGuard WriteToNetwork bytes={} endpoint={} ready={}",
-                                    b.len(),
-                                    endpoint,
-                                    ready
-                                ),
-                            );
+                            if !ready {
+                                log_msg(
+                                    2,
+                                    format!(
+                                        "[EMP-DIAG] WireGuard handshake WriteToNetwork bytes={} endpoint={}",
+                                        b.len(),
+                                        endpoint
+                                    ),
+                                );
+                            }
                             if let Err(e) = socket.send_to(b, endpoint) {"""
 if wtn_old not in s:
     raise SystemExit("Could not locate initial WriteToNetwork block")
@@ -236,17 +221,8 @@ old = '''                        boringtun::noise::TunnResult::WriteToTunnelV4(b
                             }
                         }'''
 
-new = '''                        boringtun::noise::TunnResult::WriteToTunnelV4(b, addr) => {
-                            reflected_ipv4_packets = reflected_ipv4_packets.saturating_add(1);
-                            log_msg(
-                                2,
-                                format!(
-                                    "[EMP-DIAG] WriteToTunnelV4 packet={} boringtun_addr={:?}",
-                                    reflected_ipv4_packets,
-                                    addr
-                                ),
-                            );
-                            log_ipv4_summary("RX-DECAP", b);
+new = '''                        boringtun::noise::TunnResult::WriteToTunnelV4(b, _addr) => {
+                            log_ipv4_tcp("RX-DECAP", b);
 
                             // Reflect the packet back to iOS by swapping IPv4 source/destination.
                             b.swap(12, 16);
@@ -254,20 +230,11 @@ new = '''                        boringtun::noise::TunnResult::WriteToTunnelV4(b
                             b.swap(14, 18);
                             b.swap(15, 19);
 
-                            log_ipv4_summary("TX-REFLECT", b);
+                            log_ipv4_tcp("TX-REFLECT", b);
 
                             let mut buf = [0_u8; 2048];
                             match tun.encapsulate(b, &mut buf) {
                                 boringtun::noise::TunnResult::WriteToNetwork(encapsulated) => {
-                                    log_msg(
-                                        2,
-                                        format!(
-                                            "[EMP-DIAG] reflected IPv4 packet={} encapsulated_bytes={} endpoint={}",
-                                            reflected_ipv4_packets,
-                                            encapsulated.len(),
-                                            endpoint
-                                        ),
-                                    );
                                     if let Err(e) = socket.send_to(encapsulated, endpoint) {
                                         log_msg(3, format!("[EMP-DIAG] Error sending reflected UDP packet: {:?}", e));
                                     }
@@ -315,11 +282,11 @@ required = [
     "[EMP-DIAG] WireGuard UDP endpoint changed",
     "[EMP-DIAG] WireGuard session READY",
     "[EMP-DIAG] Decapsulation error",
-    'log_ipv4_summary("RX-DECAP", b);',
-    'log_ipv4_summary("TX-REFLECT", b);',
+    'log_ipv4_tcp("RX-DECAP", b);',
+    'log_ipv4_tcp("TX-REFLECT", b);',
+    "interesting_flags",
     "payload=",
-    "[EMP-DIAG] reflected IPv4 packet",
-    "[EMP-DIAG] WriteToTunnelV4",
+    "[EMP-DIAG] encapsulate reflected IPv4 FAILED",
 ]
 patched = p.read_text()
 missing = [x for x in required if x not in patched]
@@ -329,4 +296,4 @@ if missing:
 if old in patched:
     raise SystemExit("Patch verification failed: stock WriteToTunnelV4 reflection block is still present")
 
-print("Deep EMProxy packet diagnostic patch applied and verified")
+print("Low-impact EMProxy TCP control-packet diagnostic patch applied and verified")
