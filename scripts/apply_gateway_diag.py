@@ -9,7 +9,19 @@ p = Path(sys.argv[1])
 s = p.read_text()
 
 if "[GW-DIAG] fetchUDID lockdownd_connect_rsd START" in s:
-    print("DeviceGateway diagnostic patch already present")
+    required_existing = [
+        "[GW-DIAG] tunnel ready",
+        "[GW-DIAG] service connect START",
+        "[GW-DIAG] service action START",
+        "[GW-DIAG] fetchUDID lockdownd_get_value START",
+        "[GW-DIAG] fetchUDID parse result",
+    ]
+    missing = [x for x in required_existing if x not in s]
+    if missing:
+        raise SystemExit(f"DeviceGateway diagnostic marker present but patch is incomplete; missing: {missing}")
+    if "getRustPlistString returned UDID:" in s:
+        raise SystemExit("DeviceGateway diagnostic patch is present but raw UDID logging was not redacted")
+    print("DeviceGateway diagnostic patch already present and verified")
     raise SystemExit(0)
 
 old = '''        debugLog("[IdeviceGateway] ensureRPConnection() tunnel_create_rppairing succeeded, adapter: \\(String(describing: adapter)), handshake: \\(String(describing: handshake))")'''
@@ -45,6 +57,22 @@ new = '''                try ensureRPConnection()
             } catch {'''
 if old not in s:
     raise SystemExit("Could not locate performWithService retry connect")
+s = s.replace(old, new, 1)
+
+old = '''        verboseLog("[IdeviceGateway] performWithService(\\(serviceName)) executing action")
+        return try action(client)'''
+new = '''        verboseLog("[IdeviceGateway] performWithService(\\(serviceName)) executing action")
+        debugLog("[GW-DIAG] service action START name=\\(serviceName)")
+        do {
+            let result = try action(client)
+            debugLog("[GW-DIAG] service action SUCCESS name=\\(serviceName)")
+            return result
+        } catch {
+            debugLog("[GW-DIAG] service action FAILED name=\\(serviceName) error=\\(error.localizedDescription)")
+            throw error
+        }'''
+if old not in s:
+    raise SystemExit("Could not locate performWithService action block")
 s = s.replace(old, new, 1)
 
 old = '''            var lockdownClient: OpaquePointer? = nil
@@ -128,11 +156,19 @@ old = '''                let udid = getRustPlistString(plistVal)
                 verboseLog("[IdeviceGateway] fetchUDID() getRustPlistString returned UDID: \\(String(describing: udid))")
                 return udid'''
 new = '''                let udid = getRustPlistString(plistVal)
-                verboseLog("[IdeviceGateway] fetchUDID() getRustPlistString returned UDID: \\(String(describing: udid))")
+                verboseLog("[IdeviceGateway] fetchUDID() parsed UniqueDeviceID value (redacted)")
                 debugLog("[GW-DIAG] fetchUDID parse result present=\\(udid != nil) length=\\(udid?.count ?? 0)")
                 return udid'''
 if old not in s:
-    raise SystemExit("Could not locate fetchUDID parse result")
+    raise SystemExit("Could not locate fetchUDID parse result / raw UDID log")
+s = s.replace(old, new, 1)
+
+# Redact the legacy/usbmuxd branch too, so a pasted diagnostic log never exposes
+# the device UDID if SideStore unexpectedly falls back to that path.
+old = '''                verboseLog("[IdeviceGateway] fetchUDID get_devices count: \\(count), udid: \\(udidResult ?? "nil")")'''
+new = '''                verboseLog("[IdeviceGateway] fetchUDID get_devices count: \\(count), udidPresent: \\(udidResult != nil), udidLength: \\(udidResult?.count ?? 0)")'''
+if old not in s:
+    raise SystemExit("Could not locate legacy fetchUDID raw UDID log")
 s = s.replace(old, new, 1)
 
 p.write_text(s)
@@ -141,13 +177,25 @@ required = [
     "[GW-DIAG] tunnel ready",
     "[GW-DIAG] service connect START",
     "[GW-DIAG] service retry connect",
+    "[GW-DIAG] service action START",
+    "[GW-DIAG] service action SUCCESS",
+    "[GW-DIAG] service action FAILED",
     "[GW-DIAG] fetchUDID lockdownd_connect_rsd START",
     "[GW-DIAG] fetchUDID lockdownd_get_value START",
     "[GW-DIAG] fetchUDID parse result",
+    "parsed UniqueDeviceID value (redacted)",
+    "udidPresent:",
 ]
 patched = p.read_text()
 missing = [x for x in required if x not in patched]
 if missing:
     raise SystemExit(f"Patch verification failed; missing: {missing}")
 
-print("DeviceGateway downstream diagnostic patch applied and verified")
+for forbidden in [
+    "getRustPlistString returned UDID:",
+    'udid: \\(udidResult ?? "nil")',
+]:
+    if forbidden in patched:
+        raise SystemExit(f"Patch verification failed: raw UDID log still present: {forbidden}")
+
+print("DeviceGateway downstream diagnostic patch applied, verified, and UDID logging redacted")
