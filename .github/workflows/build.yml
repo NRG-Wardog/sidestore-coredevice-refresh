@@ -69,6 +69,8 @@ jobs:
 
           grep -q 'SS-DIAG' idevice/ffi/src/tunnel_provider.rs
           grep -q 'EMP-DIAG' em_proxy/src/lib.rs
+          grep -q 'log_ipv4_tcp("RX-DECAP", b);' em_proxy/src/lib.rs
+          grep -q 'log_ipv4_tcp("TX-REFLECT", b);' em_proxy/src/lib.rs
           grep -q 'GW-DIAG' minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
           grep -q 'path: "LocalBinary/IDevice.xcframework"' minimuxer/DeviceGateway/Package.swift
           grep -q 'path: "LocalBinary/OpenSSL.xcframework"' minimuxer/DeviceGateway/Package.swift
@@ -86,7 +88,7 @@ jobs:
           cargo check --locked --lib
 
   build-native-diag:
-    name: Build patched IDevice + EMProxy (iOS only)
+    name: Build patched EMProxy + IDevice (iOS only)
     needs: preflight
     runs-on: macos-26
     timeout-minutes: 25
@@ -130,10 +132,48 @@ jobs:
           restore-keys: |
             sidestore-diag-macos26-arm64-rust-v2-
 
-      - name: Install Rust build prerequisites
+      - name: Add iOS Rust target
         run: |
           set -euo pipefail
           rustup target add aarch64-apple-ios
+
+      # EMProxy is the smaller and less-proven patched component. Build it first
+      # so an iOS-specific failure does not waste several minutes compiling IDevice.
+      - name: Apply EMProxy TCP packet diagnostic patch
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/apply_emproxy_diag.py em_proxy/src/lib.rs
+          grep -n "EMP-DIAG" em_proxy/src/lib.rs
+          grep -n 'log_ipv4_tcp("RX-DECAP", b);' em_proxy/src/lib.rs
+          grep -n 'log_ipv4_tcp("TX-REFLECT", b);' em_proxy/src/lib.rs
+
+      - name: Build iOS arm64 EMProxy XCFramework
+        working-directory: em_proxy
+        run: |
+          set -euo pipefail
+
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            cargo build --release --target aarch64-apple-ios
+
+          test -f target/aarch64-apple-ios/release/libem_proxy.a
+          test -f include/EMProxy/em_proxy.h
+          test -f include/EMProxy/module.modulemap
+
+          rm -rf libs/EMProxy.xcframework EMProxy.xcframework.zip
+          mkdir -p libs
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libem_proxy.a \
+            -headers include \
+            -output libs/EMProxy.xcframework
+
+          test -d libs/EMProxy.xcframework
+          (cd libs && zip -qry ../EMProxy.xcframework.zip EMProxy.xcframework)
+          shasum -a 256 EMProxy.xcframework.zip
+
+      - name: Install IDevice bindgen prerequisite
+        run: |
+          set -euo pipefail
           if ! command -v bindgen >/dev/null 2>&1; then
             cargo install --locked bindgen-cli --version 0.72.1
           fi
@@ -170,50 +210,18 @@ jobs:
           (cd swift && zip -qry ../IDevice.xcframework.zip IDevice.xcframework)
           shasum -a 256 IDevice.xcframework.zip
 
-      - name: Apply EMProxy TCP packet diagnostic patch
-        run: |
-          set -euo pipefail
-          python3 builder/scripts/apply_emproxy_diag.py em_proxy/src/lib.rs
-          grep -n "EMP-DIAG" em_proxy/src/lib.rs
-          grep -n 'log_ipv4_summary("RX-DECAP", b);' em_proxy/src/lib.rs
-          grep -n 'log_ipv4_summary("TX-REFLECT", b);' em_proxy/src/lib.rs
-
-      - name: Build iOS arm64 EMProxy XCFramework
-        working-directory: em_proxy
-        run: |
-          set -euo pipefail
-
-          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
-            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
-            cargo build --release --target aarch64-apple-ios
-
-          test -f target/aarch64-apple-ios/release/libem_proxy.a
-          test -f include/EMProxy/em_proxy.h
-          test -f include/EMProxy/module.modulemap
-
-          rm -rf libs/EMProxy.xcframework EMProxy.xcframework.zip
-          mkdir -p libs
-          xcodebuild -create-xcframework \
-            -library target/aarch64-apple-ios/release/libem_proxy.a \
-            -headers include \
-            -output libs/EMProxy.xcframework
-
-          test -d libs/EMProxy.xcframework
-          (cd libs && zip -qry ../EMProxy.xcframework.zip EMProxy.xcframework)
-          shasum -a 256 EMProxy.xcframework.zip
+      - name: Upload patched EMProxy
+        uses: actions/upload-artifact@v4
+        with:
+          name: Patched-EMProxy-iOS
+          path: em_proxy/EMProxy.xcframework.zip
+          if-no-files-found: error
 
       - name: Upload patched IDevice
         uses: actions/upload-artifact@v4
         with:
           name: Patched-IDevice-iOS
           path: idevice/IDevice.xcframework.zip
-          if-no-files-found: error
-
-      - name: Upload patched EMProxy
-        uses: actions/upload-artifact@v4
-        with:
-          name: Patched-EMProxy-iOS
-          path: em_proxy/EMProxy.xcframework.zip
           if-no-files-found: error
 
   build-sidestore:
