@@ -1,2 +1,2 @@
-2026-08-30T05:10:00+03:00
-rebuild after on-device evidence: retain explicit local VPN peer + correct 49152 reflection + match pymobiledevice3 CDTunnel single TLS-record handshake write
+2026-08-30T05:25:00+03:00
+rebuild after v3 on-device evidence: direct physical listener reaches TLS then closes CDTunnel as a self-connect; bind en0-v4 dynamic TCP source to 10.7.0.10 so CoreDevice sees a distinct tunnel peer
