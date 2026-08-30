@@ -1,2 +1,2 @@
-2026-08-30T06:04:00+03:00
-rebuild after preflight caught escaped raw-string bug: emit exact valid JSON bytes {"type":"clientHandshakeRequest","mtu":16000} in one TLS application-data write and reject escaped variants.
+2026-08-30T06:28:00+03:00
+v7 forensic NAT46: preserve fixed IPv4 control/lockdown reflection, translate only dynamic RemotePairing high ports to the phone's en0 IPv6 address through synthetic peer fd00:7::1, translate replies back to 10.7.0.1, and force privacy-safe Rust error-stage diagnostics despite disabled-first logger initialization.
