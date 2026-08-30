@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -7,6 +8,41 @@ if len(sys.argv) != 2:
 
 p = Path(sys.argv[1])
 s = p.read_text()
+script_dir = Path(__file__).resolve().parent
+repo_root = p.resolve().parents[2]
+listener_mod = repo_root / "idevice/src/remote_pairing/mod.rs"
+tunnel_rs = repo_root / "idevice/src/remote_pairing/tunnel.rs"
+
+
+def apply_companion_patches() -> None:
+    if not listener_mod.exists():
+        raise SystemExit(f"RemotePairing mod.rs not found at {listener_mod}")
+    if not tunnel_rs.exists():
+        raise SystemExit(f"RemotePairing tunnel.rs not found at {tunnel_rs}")
+
+    subprocess.run(
+        [sys.executable, str(script_dir / "apply_listener_parity.py"), str(listener_mod)],
+        check=True,
+    )
+    subprocess.run(
+        [sys.executable, str(script_dir / "apply_openssl_stage_diag.py"), str(tunnel_rs)],
+        check=True,
+    )
+
+    listener_text = listener_mod.read_text()
+    tunnel_text = tunnel_rs.read_text()
+    companion_required = [
+        (listener_text, "[SS-LISTENER] pymobiledevice3 listener parity active"),
+        (listener_text, '"peerConnectionsInfo"'),
+        (listener_text, '"owningProcessName": "CoreDeviceService"'),
+        (tunnel_text, "[SS-OPENSSL-STAGE] TLS_HANDSHAKE_SUCCESS"),
+        (tunnel_text, "[SS-OPENSSL-STAGE] CDTUNNEL_SUCCESS"),
+        (tunnel_text, "[SS-OPENSSL-STAGE] CDTUNNEL_FAILED"),
+    ]
+    missing = [marker for text, marker in companion_required if marker not in text]
+    if missing:
+        raise SystemExit(f"OpenSSL companion patch verification failed; missing: {missing}")
+
 
 marker = "[SS-OPENSSL] standards TLS-PSK transport active"
 if marker in s:
@@ -19,7 +55,8 @@ if marker in s:
     missing = [x for x in required if x not in s]
     if missing:
         raise SystemExit(f"OpenSSL transport marker present but patch incomplete; missing: {missing}")
-    print("OpenSSL adaptive transport patch already present and verified")
+    apply_companion_patches()
+    print("OpenSSL adaptive transport and companion protocol patches already present and verified")
     raise SystemExit(0)
 
 if "[SS-ADAPT] adaptive transport engine active" not in s:
@@ -80,12 +117,10 @@ new_start = '''        tracing::error!(
             tunnel_port,
             rpc.encryption_key().len()
         );
-        // The pure-Rust TLS implementation is useful for diagnostics, but on this
-        // iOS build it completes TLS and then receives a TLS Alert for the first
-        // CDTunnel application record. Use OpenSSL's mature TLS 1.2 PSK record
-        // implementation here, matching pymobiledevice3's working TCP-tunnel path.
-        // connect_tls_psk_tunnel() includes both the TLS-PSK handshake and the
-        // CDTunnel clientHandshakeRequest, so success means we are ready for RSD.
+        // Use OpenSSL's TLS 1.2 PSK implementation, matching pymobiledevice3.
+        // Companion patches applied by this builder also match pymobiledevice3's
+        // createListener peerConnectionsInfo metadata and split TLS/CDTunnel logs,
+        // so one runtime test covers transport, listener policy, TLS and RSD.
         let tunnel = match tokio::time::timeout(
             std::time::Duration::from_secs(7),
             connect_tls_psk_tunnel(tunnel_stream, rpc.encryption_key()),
@@ -126,6 +161,7 @@ if old_start not in s:
 s = s.replace(old_start, new_start, 1)
 
 p.write_text(s)
+apply_companion_patches()
 
 patched = p.read_text()
 required = [
@@ -145,4 +181,4 @@ if missing:
 if "connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key())" in patched:
     raise SystemExit("OpenSSL transport verification failed: active native TLS call remains")
 
-print("OpenSSL adaptive TLS-PSK/CDTunnel transport applied and verified")
+print("OpenSSL adaptive TLS-PSK + pymobiledevice3 listener parity + stage diagnostics applied and verified")
