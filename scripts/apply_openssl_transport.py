@@ -24,6 +24,10 @@ def apply_companion_patches() -> None:
         raise SystemExit(f"CDTunnel tunnel.rs not found at {cdtunnel_rs}")
 
     subprocess.run(
+        [sys.executable, str(script_dir / "apply_source_bound_dynamic.py"), str(p)],
+        check=True,
+    )
+    subprocess.run(
         [sys.executable, str(script_dir / "apply_listener_parity.py"), str(listener_mod)],
         check=True,
     )
@@ -36,10 +40,13 @@ def apply_companion_patches() -> None:
         check=True,
     )
 
+    provider_text = p.read_text()
     listener_text = listener_mod.read_text()
     tunnel_text = tunnel_rs.read_text()
     cdtunnel_text = cdtunnel_rs.read_text()
     companion_required = [
+        (provider_text, "[SS-SOURCE-BOUND] en0-v4 source-bound connect active"),
+        (provider_text, "ss_connect_dynamic_candidate(&label, target)"),
         (listener_text, "[SS-LISTENER] pymobiledevice3 listener parity active"),
         (listener_text, '"peerConnectionsInfo"'),
         (listener_text, '"owningProcessName": "CoreDeviceService"'),
@@ -129,7 +136,9 @@ new_start = '''        tracing::error!(
         );
         // Use OpenSSL's TLS 1.2 PSK implementation, matching pymobiledevice3.
         // Companion patches applied by this builder also match pymobiledevice3's
-        // createListener metadata and CDTunnel TLS record boundaries.
+        // createListener metadata and CDTunnel TLS record boundaries. The en0-v4
+        // candidate is additionally source-bound to the utun address so CoreDevice
+        // sees a distinct peer rather than an on-device physical self-connect.
         let tunnel = match tokio::time::timeout(
             std::time::Duration::from_secs(7),
             connect_tls_psk_tunnel(tunnel_stream, rpc.encryption_key()),
@@ -177,6 +186,8 @@ required = [
     marker,
     "use idevice::remote_pairing::connect_tls_psk_tunnel;",
     "connect_tls_psk_tunnel(tunnel_stream, rpc.encryption_key())",
+    "[SS-SOURCE-BOUND] en0-v4 source-bound connect active",
+    "ss_connect_dynamic_candidate(&label, target)",
     "[SS-OPENSSL] TLS+CDTunnel START",
     "[SS-OPENSSL] TLS+CDTunnel SUCCESS",
     "[SS-OPENSSL] TLS+CDTunnel FAILED",
@@ -190,4 +201,4 @@ if missing:
 if "connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key())" in patched:
     raise SystemExit("OpenSSL transport verification failed: active native TLS call remains")
 
-print("OpenSSL adaptive TLS-PSK + listener parity + CDTunnel record parity + stage diagnostics applied and verified")
+print("OpenSSL adaptive TLS-PSK + source-bound en0 + listener parity + CDTunnel record parity + stage diagnostics applied and verified")
