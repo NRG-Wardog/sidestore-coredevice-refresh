@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -8,6 +9,26 @@ if len(sys.argv) != 2:
 p = Path(sys.argv[1])
 s = p.read_text()
 marker = "[SS-BOOT-FIX] strict transport validation active"
+
+
+def apply_v11_gateway_upgrade() -> None:
+    script = Path(__file__).with_name("apply_v11_gateway_upgrade.py")
+    repo_root = p.parent.parent
+    gateway = repo_root / "Dependencies/minimuxer/DeviceGateway/idevice/IdeviceGateway.swift"
+    for required in [script, gateway]:
+        if not required.exists():
+            raise SystemExit(f"Missing required v11 gateway-upgrade input: {required}")
+    subprocess.check_call([sys.executable, str(script), str(gateway)])
+    patched_gateway = gateway.read_text()
+    required_markers = [
+        "[SS-V11-SPLIT-PROVIDER]",
+        "idevice_sidestore_split_tcp_provider_new",
+        "dynamic_service_route=kernel-candidates",
+    ]
+    missing = [x for x in required_markers if x not in patched_gateway]
+    if missing:
+        raise SystemExit(f"v11 gateway-upgrade verification failed: {missing}")
+
 
 if marker in s:
     required = [
@@ -22,7 +43,8 @@ if marker in s:
         raise SystemExit(f"Boot transport fix marker present but patch incomplete: {missing}")
     if "SUCCEEDED. UDID: \\(deviceUDID" in s:
         raise SystemExit("Raw UDID success logging remains")
-    print("Strict boot transport validation already present and verified")
+    apply_v11_gateway_upgrade()
+    print("Strict boot transport validation + v11 gateway upgrade already present and verified")
     raise SystemExit(0)
 
 old = '''        // Validate the pairing by trying to fetch the UDID
@@ -98,4 +120,5 @@ for forbidden in [
     if forbidden in patched:
         raise SystemExit(f"Privacy verification failed: raw UDID logging remains: {forbidden}")
 
-print("Strict AppBootManager transport validation applied and verified")
+apply_v11_gateway_upgrade()
+print("Strict AppBootManager transport validation + v11 gateway upgrade applied and verified")
