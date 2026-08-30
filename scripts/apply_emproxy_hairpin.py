@@ -17,6 +17,7 @@ if marker in s:
         "TX-HAIRPIN",
         "FORWARD flow installed",
         "REVERSE flow matched",
+        "src_port != legacy_control_port",
     ]
     missing = [x for x in required if x not in s]
     if missing:
@@ -201,11 +202,15 @@ fn hairpin_translate_ipv4_tcp(packet: &mut [u8], flows: &mut Vec<HairpinFlow>) -
 
     // RemotePairing control is fixed at 49152 and already works with ordinary
     // reflection. createListener() uses the iOS high ephemeral range above it.
-    // Restrict hairpinning to those ports so fixed control and unrelated traffic keep
-    // the proven reflection path.
+    // Restrict hairpinning to high-port requests and explicitly exclude packets
+    // sourced by the legacy control listener. Its SYN|ACK destination is an
+    // ephemeral client port, so checking destination port alone is insufficient.
     let virtual_peer = [10, 7, 0, 1];
+    let legacy_control_port: u16 = 49152;
     let client_is_wireguard = src[0] == 10 && src[1] == 7 && src[2] == 0 && src != virtual_peer;
-    let dynamic_candidate = dst == virtual_peer && dst_port >= 49153;
+    let dynamic_candidate = dst == virtual_peer
+        && dst_port >= 49153
+        && src_port != legacy_control_port;
     if !client_is_wireguard || !dynamic_candidate {
         return false;
     }
@@ -328,6 +333,7 @@ required = [
     "hairpin_en0_ipv4",
     "hairpin_translate_ipv4_tcp",
     "dynamic_tcp_min=49153",
+    "src_port != legacy_control_port",
     "FORWARD flow installed",
     "REVERSE flow matched",
     "restored packet for legacy reflection",
