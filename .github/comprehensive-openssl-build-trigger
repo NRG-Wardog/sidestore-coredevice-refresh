@@ -1,2 +1,2 @@
-2026-08-30T08:45:00+03:00
-v8 scoped IPv6 source-bound rebuild: stop using raw NAT46 for the dynamic listener; bind the TCP client to fd00:7::10, preserve the en0 link-local scope id, test Apple IPV6_BOUND_IF as a second kernel-routing mode, retain one direct en0-v6 control path, fail fast when Wi-Fi/en0 is absent, and reduce the candidate matrix to relevant paths only.
+2026-08-30T09:30:00+03:00
+v9 CoreDeviceProxy lockdown rebuild: v8 proved utun-source to en0 is rejected by iOS routing while direct en0 self-connect dies at CDTunnel. Prefer traditional lockdown pairing + TcpProvider at 10.7.0.1 + tunnel_create_usb/CoreDeviceProxy software tunnel/RSD; retain RemotePairing v8 forensic fallback with explicit pairing-type diagnostics.
