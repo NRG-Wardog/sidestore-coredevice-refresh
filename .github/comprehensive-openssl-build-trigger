@@ -1,2 +1,2 @@
-2026-08-30T06:59:00+03:00
-v7 final forensic NAT46 rebuild: create NAT46 state only from a new SYN without ACK, exclude replies sourced by fixed control 49152 or lockdown 62078, preserve their proven IPv4 reflection, bridge only genuine dynamic CoreDevice listeners over fd00:7::1, and retain privacy-safe Rust stage diagnostics.
+2026-08-30T08:45:00+03:00
+v8 scoped IPv6 source-bound rebuild: stop using raw NAT46 for the dynamic listener; bind the TCP client to fd00:7::10, preserve the en0 link-local scope id, test Apple IPV6_BOUND_IF as a second kernel-routing mode, retain one direct en0-v6 control path, fail fast when Wi-Fi/en0 is absent, and reduce the candidate matrix to relevant paths only.
