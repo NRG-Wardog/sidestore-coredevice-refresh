@@ -1,2 +1,2 @@
-2026-08-30T09:30:00+03:00
-v9 CoreDeviceProxy lockdown rebuild: v8 proved utun-source to en0 is rejected by iOS routing while direct en0 self-connect dies at CDTunnel. Prefer traditional lockdown pairing + TcpProvider at 10.7.0.1 + tunnel_create_usb/CoreDeviceProxy software tunnel/RSD; retain RemotePairing v8 forensic fallback with explicit pairing-type diagnostics.
+2026-08-30T09:40:00+03:00
+v9 CoreDeviceProxy lockdown rebuild after Swift compile fix: remove invalid optional shadow reassignment in CoreDevice tunnel error handling; architecture unchanged.
