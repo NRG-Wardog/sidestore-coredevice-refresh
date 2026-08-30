@@ -1,2 +1,2 @@
-2026-08-30T10:46:00+03:00
-v10 rebuild: active Cargo default feature detection fixed; Lockdown pairing feature, PairRecord bootstrap, cache, and CoreDeviceProxy path unchanged.
+2026-08-30T11:28:00+03:00
+v11: split CoreDevice provider. Lockdown control uses 10.7.0.1:62078; Lockdown-started dynamic service ports use direct en0/loopback kernel candidates with stage-by-stage diagnostics.
