@@ -8,10 +8,11 @@ if len(sys.argv) != 2:
 p = Path(sys.argv[1])
 s = p.read_text()
 marker = "[SS-CDTUNNEL-PARITY] exact client handshake bytes active"
+exact_literal = 'br#"{"type":"clientHandshakeRequest","mtu":16000}"#'
 
 if marker in s:
     required = [
-        'br#"{\\"type\\":\\"clientHandshakeRequest\\",\\"mtu\\":16000}"#',
+        exact_literal,
         "let mut packet = Vec::with_capacity",
         "packet.extend_from_slice(CDTUNNEL_MAGIC)",
         "stream.write_all(&packet).await?",
@@ -43,7 +44,7 @@ new = '''        // Match the known-working TCP CDTunnel clients byte-for-byte. 
         // serializer-dependent ordering/spacing here and keep the entire frame in
         // one TLS application-data write.
         // [SS-CDTUNNEL-PARITY] single-record handshake write active
-        let body: &[u8] = br#"{\"type\":\"clientHandshakeRequest\",\"mtu\":16000}"#;
+        let body: &[u8] = br#"{"type":"clientHandshakeRequest","mtu":16000}"#;
         let mut packet = Vec::with_capacity(CDTUNNEL_MAGIC.len() + 2 + body.len());
         packet.extend_from_slice(CDTUNNEL_MAGIC);
         packet.extend_from_slice(&(body.len() as u16).to_be_bytes());
@@ -69,7 +70,7 @@ patched = p.read_text()
 required = [
     marker,
     "[SS-CDTUNNEL-PARITY] single-record handshake write active",
-    'br#"{\\"type\\":\\"clientHandshakeRequest\\",\\"mtu\\":16000}"#',
+    exact_literal,
     "let mut packet = Vec::with_capacity",
     "packet.extend_from_slice(CDTUNNEL_MAGIC)",
     "packet.extend_from_slice(&(body.len() as u16).to_be_bytes())",
@@ -84,8 +85,9 @@ for forbidden in [
     "serde_json::to_vec(&request)?",
     "stream.write_all(CDTUNNEL_MAGIC).await?;",
     "stream.write_all(&body).await?;",
+    r'br#"{\"type\"',
 ]:
     if forbidden in patched:
-        raise SystemExit(f"Old serializer/split-write CDTunnel path still remains: {forbidden}")
+        raise SystemExit(f"Old serializer/split-write/escaped CDTunnel path still remains: {forbidden}")
 
 print("Patched CDTunnel handshake to exact known-working bytes in one TLS application-data write")
