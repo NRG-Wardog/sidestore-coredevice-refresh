@@ -1,0 +1,438 @@
+name: Build SideStore Comprehensive Self-Refresh Fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/comprehensive-build-trigger"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidestore-comprehensive-self-refresh
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight complete patch stack on exact sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout diagnostic builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Checkout exact IDevice source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: 61c27041f8d3d0be4cc3e046ee04501649c9d66e
+          path: idevice
+
+      - name: Checkout exact EMProxy source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/em_proxy
+          ref: 6e117e140ca7cff4ff106bdefa18147552a0e592
+          path: em_proxy
+
+      - name: Checkout exact minimuxer source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/minimuxer
+          ref: 71b957efc65e4687a94b1f1dac27fb3344c22936
+          path: minimuxer
+
+      - name: Checkout exact SideStore source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/SideStore
+          ref: f3a18d61efae65b05dc935fff75b89225efdb0ff
+          path: SideStore
+
+      - name: Validate every Python patch script
+        run: |
+          set -euo pipefail
+          python3 -m py_compile builder/scripts/*.py
+
+      - name: Apply and verify complete patch stack
+        run: |
+          set -euo pipefail
+
+          # IDevice transport: existing exhaustive fallbacks + exact CoreDevice listener
+          # metadata + phase-separated TLS/CDTunnel diagnostics.
+          python3 builder/scripts/apply_diag_patch.py idevice/ffi/src/tunnel_provider.rs
+          python3 builder/scripts/apply_adaptive_transport.py idevice/ffi/src/tunnel_provider.rs
+          python3 builder/scripts/apply_listener_parity.py idevice/idevice/src/remote_pairing/mod.rs
+          python3 builder/scripts/apply_tls_phase_diag.py idevice/idevice/src/remote_pairing/tunnel.rs
+
+          # EMProxy: retain proven fixed-port reflection, add stateful high-port
+          # physical-interface hairpin with repaired IPv4/TCP checksums.
+          python3 builder/scripts/apply_emproxy_diag.py em_proxy/src/lib.rs
+          python3 builder/scripts/apply_emproxy_hairpin.py em_proxy/src/lib.rs
+
+          # DeviceGateway serialization/diagnostics.
+          python3 builder/scripts/patch_devicegateway_package.py minimuxer/DeviceGateway/Package.swift
+          python3 builder/scripts/patch_minimuxer_package.py minimuxer/Package.swift
+          python3 builder/scripts/apply_gateway_diag.py minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          python3 builder/scripts/apply_gateway_serialization.py minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+
+          # App-level correctness: nil UDID is transport failure; background refresh
+          # never starts transport/signing while signed out.
+          python3 builder/scripts/apply_boot_transport_fix.py SideStore/SideStore/AppBootManager.swift
+          python3 builder/scripts/apply_background_auth_gate.py SideStore/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift
+
+          grep -q 'SS-ADAPT' idevice/ffi/src/tunnel_provider.rs
+          grep -q 'SS-IFACE' idevice/ffi/src/tunnel_provider.rs
+          grep -q 'TRANSPORT SUCCESS' idevice/ffi/src/tunnel_provider.rs
+          grep -q 'SS-LISTENER' idevice/idevice/src/remote_pairing/mod.rs
+          grep -q 'peerConnectionsInfo' idevice/idevice/src/remote_pairing/mod.rs
+          grep -q 'owningProcessName.*CoreDeviceService' idevice/idevice/src/remote_pairing/mod.rs
+          grep -q 'SS-TLS-PHASE' idevice/idevice/src/remote_pairing/tunnel.rs
+          grep -q 'TLS_HANDSHAKE_SUCCESS' idevice/idevice/src/remote_pairing/tunnel.rs
+          grep -q 'CDTUNNEL_SUCCESS' idevice/idevice/src/remote_pairing/tunnel.rs
+          grep -q 'EMP-DIAG' em_proxy/src/lib.rs
+          grep -q 'EMP-HAIRPIN' em_proxy/src/lib.rs
+          grep -q 'repair_ipv4_tcp_checksums' em_proxy/src/lib.rs
+          grep -q 'dynamic_tcp_min=49153' em_proxy/src/lib.rs
+          grep -q 'GW-DIAG' minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          grep -q 'GW-SERIAL' minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          grep -q 'SS-BOOT-FIX' SideStore/SideStore/AppBootManager.swift
+          grep -q 'guard let deviceUDID = fetchedUDID, !deviceUDID.isEmpty' SideStore/SideStore/AppBootManager.swift
+          grep -q 'SS-AUTH-GATE' SideStore/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift
+          grep -q 'AuthManager.shared.isAuthenticated' SideStore/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift
+          grep -q 'path: "LocalBinary/IDevice.xcframework"' minimuxer/DeviceGateway/Package.swift
+          grep -q 'path: "LocalBinary/OpenSSL.xcframework"' minimuxer/DeviceGateway/Package.swift
+          grep -q 'path: "LocalBinary/EMProxy.xcframework"' minimuxer/Package.swift
+
+          if grep -q 'SS-MPATH' idevice/ffi/src/tunnel_provider.rs; then
+            echo 'Stale fixed multipath patch remains active' >&2
+            exit 1
+          fi
+          if grep -q 'getRustPlistString returned UDID:' minimuxer/DeviceGateway/idevice/IdeviceGateway.swift; then
+            echo 'Raw DeviceGateway UDID logging remains' >&2
+            exit 1
+          fi
+          if grep -q 'SUCCEEDED\. UDID:' SideStore/SideStore/AppBootManager.swift; then
+            echo 'Raw AppBootManager UDID logging remains' >&2
+            exit 1
+          fi
+          if grep -q 'hex::encode\|base64::encode.*packet\|packet payload bytes' em_proxy/src/lib.rs; then
+            echo 'Packet-content logging pattern detected' >&2
+            exit 1
+          fi
+
+      - name: Compile-check patched EMProxy on Linux
+        working-directory: em_proxy
+        run: |
+          set -euo pipefail
+          cargo check --locked --lib
+
+      - name: Compile-check patched IDevice transport stack on Linux
+        working-directory: idevice
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path ffi/Cargo.toml \
+            --no-default-features \
+            --features 'remote_pairing,rsd,tcp,core_device,core_device_proxy,xpc,tunnel_tcp_stack,aws-lc'
+
+  build-native:
+    name: Build comprehensive EMProxy + IDevice iOS binaries
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - name: Checkout diagnostic builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Checkout exact IDevice source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: 61c27041f8d3d0be4cc3e046ee04501649c9d66e
+          submodules: recursive
+          path: idevice
+
+      - name: Checkout exact EMProxy source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/em_proxy
+          ref: 6e117e140ca7cff4ff106bdefa18147552a0e592
+          path: em_proxy
+
+      - name: Setup Xcode 26.4
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
+      - name: Cache Rust dependencies and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/bindgen
+            idevice/target
+            em_proxy/target
+          key: sidestore-comprehensive-macos26-arm64-rust-v1-${{ hashFiles('idevice/Cargo.lock', 'em_proxy/Cargo.lock') }}
+          restore-keys: |
+            sidestore-comprehensive-macos26-arm64-rust-v1-
+            sidestore-adaptive-macos26-arm64-rust-v1-
+
+      - name: Add iOS Rust target
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-ios
+
+      - name: Patch EMProxy with diagnostics and physical hairpin
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/apply_emproxy_diag.py em_proxy/src/lib.rs
+          python3 builder/scripts/apply_emproxy_hairpin.py em_proxy/src/lib.rs
+          grep -n 'EMP-DIAG\|EMP-HAIRPIN' em_proxy/src/lib.rs
+
+      - name: Build iOS arm64 EMProxy XCFramework
+        working-directory: em_proxy
+        run: |
+          set -euo pipefail
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            cargo build --release --target aarch64-apple-ios
+          test -f target/aarch64-apple-ios/release/libem_proxy.a
+          test -f include/EMProxy/em_proxy.h
+          test -f include/EMProxy/module.modulemap
+          rm -rf libs/EMProxy.xcframework EMProxy.xcframework.zip
+          mkdir -p libs
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libem_proxy.a \
+            -headers include \
+            -output libs/EMProxy.xcframework
+          test -d libs/EMProxy.xcframework
+          (cd libs && zip -qry ../EMProxy.xcframework.zip EMProxy.xcframework)
+          shasum -a 256 EMProxy.xcframework.zip
+
+      - name: Install IDevice bindgen prerequisite
+        run: |
+          set -euo pipefail
+          if ! command -v bindgen >/dev/null 2>&1; then
+            cargo install --locked bindgen-cli --version 0.72.1
+          fi
+          bindgen --version
+
+      - name: Apply complete IDevice transport patch
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/apply_diag_patch.py idevice/ffi/src/tunnel_provider.rs
+          python3 builder/scripts/apply_adaptive_transport.py idevice/ffi/src/tunnel_provider.rs
+          python3 builder/scripts/apply_listener_parity.py idevice/idevice/src/remote_pairing/mod.rs
+          python3 builder/scripts/apply_tls_phase_diag.py idevice/idevice/src/remote_pairing/tunnel.rs
+          grep -n 'SS-ADAPT\|SS-IFACE' idevice/ffi/src/tunnel_provider.rs
+          grep -n 'SS-LISTENER' idevice/idevice/src/remote_pairing/mod.rs
+          grep -n 'SS-TLS-PHASE' idevice/idevice/src/remote_pairing/tunnel.rs
+          if grep -q 'SS-MPATH' idevice/ffi/src/tunnel_provider.rs; then exit 1; fi
+
+      - name: Build iOS arm64 IDevice XCFramework
+        working-directory: idevice
+        run: |
+          set -euo pipefail
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
+            cargo build --release --target aarch64-apple-ios --features obfuscate \
+            --manifest-path ffi/Cargo.toml
+          test -f target/aarch64-apple-ios/release/libidevice_ffi.a
+          test -f ffi/idevice.h
+          rm -rf swift/IDevice.xcframework IDevice.xcframework.zip
+          cp ffi/idevice.h swift/include/idevice.h
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libidevice_ffi.a \
+            -headers swift/include \
+            -output swift/IDevice.xcframework
+          test -d swift/IDevice.xcframework
+          (cd swift && zip -qry ../IDevice.xcframework.zip IDevice.xcframework)
+          shasum -a 256 IDevice.xcframework.zip
+
+      - name: Upload comprehensive EMProxy
+        uses: actions/upload-artifact@v4
+        with:
+          name: Comprehensive-EMProxy-iOS
+          path: em_proxy/EMProxy.xcframework.zip
+          if-no-files-found: error
+
+      - name: Upload comprehensive IDevice
+        uses: actions/upload-artifact@v4
+        with:
+          name: Comprehensive-IDevice-iOS
+          path: idevice/IDevice.xcframework.zip
+          if-no-files-found: error
+
+  build-sidestore:
+    name: Build comprehensive SideStore IPA
+    needs: build-native
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - name: Checkout diagnostic builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Checkout exact SideStore Nightly source
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/SideStore
+          ref: f3a18d61efae65b05dc935fff75b89225efdb0ff
+          submodules: recursive
+          fetch-depth: 0
+          path: SideStore
+
+      - name: Verify pinned minimuxer revision
+        working-directory: SideStore
+        run: |
+          set -euo pipefail
+          actual="$(git -C Dependencies/minimuxer rev-parse HEAD)"
+          expected="71b957efc65e4687a94b1f1dac27fb3344c22936"
+          echo "minimuxer=$actual"
+          test "$actual" = "$expected"
+
+      - name: Setup Xcode 26.4
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
+      - name: Install SideStore build tools
+        run: |
+          set -euo pipefail
+          brew install ldid xcbeautify
+
+      - name: Download comprehensive IDevice
+        uses: actions/download-artifact@v4
+        with:
+          name: Comprehensive-IDevice-iOS
+          path: patched-native/idevice
+
+      - name: Download comprehensive EMProxy
+        uses: actions/download-artifact@v4
+        with:
+          name: Comprehensive-EMProxy-iOS
+          path: patched-native/emproxy
+
+      - name: Inject comprehensive native binaries and local OpenSSL
+        run: |
+          set -euo pipefail
+          test -f patched-native/idevice/IDevice.xcframework.zip
+          test -f patched-native/emproxy/EMProxy.xcframework.zip
+          rm -rf patched-native/idevice/unpacked patched-native/emproxy/unpacked
+          mkdir -p patched-native/idevice/unpacked patched-native/emproxy/unpacked
+          unzip -q patched-native/idevice/IDevice.xcframework.zip -d patched-native/idevice/unpacked
+          unzip -q patched-native/emproxy/EMProxy.xcframework.zip -d patched-native/emproxy/unpacked
+          test -d patched-native/idevice/unpacked/IDevice.xcframework
+          test -d patched-native/emproxy/unpacked/EMProxy.xcframework
+
+          DEVICE_LOCAL="SideStore/Dependencies/minimuxer/DeviceGateway/LocalBinary"
+          MINIMUXER_LOCAL="SideStore/Dependencies/minimuxer/LocalBinary"
+          rm -rf "$DEVICE_LOCAL/IDevice.xcframework" "$DEVICE_LOCAL/OpenSSL.xcframework" "$MINIMUXER_LOCAL/EMProxy.xcframework"
+          mkdir -p "$DEVICE_LOCAL" "$MINIMUXER_LOCAL"
+          cp -R patched-native/idevice/unpacked/IDevice.xcframework "$DEVICE_LOCAL/IDevice.xcframework"
+          cp -R patched-native/emproxy/unpacked/EMProxy.xcframework "$MINIMUXER_LOCAL/EMProxy.xcframework"
+
+          OPENSSL_ZIP="/tmp/OpenSSL.xcframework.zip"
+          OPENSSL_DIR="/tmp/openssl-xcframework"
+          rm -f "$OPENSSL_ZIP"
+          rm -rf "$OPENSSL_DIR"
+          mkdir -p "$OPENSSL_DIR"
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://github.com/krzyzanowskim/OpenSSL/releases/download/3.6.2000/OpenSSL.xcframework.zip" \
+            --output "$OPENSSL_ZIP"
+          printf '%s  %s\n' \
+            "37846a8bd302cb2443eff47f1045ab844d0cd40bf82cc6159cfad9aa5c3eff9e" \
+            "$OPENSSL_ZIP" | shasum -a 256 -c -
+          unzip -q "$OPENSSL_ZIP" -d "$OPENSSL_DIR"
+          FOUND_OPENSSL="$(find "$OPENSSL_DIR" -type d -name OpenSSL.xcframework -print -quit)"
+          test -n "$FOUND_OPENSSL"
+          cp -R "$FOUND_OPENSSL" "$DEVICE_LOCAL/OpenSSL.xcframework"
+
+          python3 builder/scripts/patch_devicegateway_package.py SideStore/Dependencies/minimuxer/DeviceGateway/Package.swift
+          python3 builder/scripts/patch_minimuxer_package.py SideStore/Dependencies/minimuxer/Package.swift
+
+      - name: Apply complete DeviceGateway and app-level fixes
+        run: |
+          set -euo pipefail
+          GATEWAY="SideStore/Dependencies/minimuxer/DeviceGateway/idevice/IdeviceGateway.swift"
+          BOOT="SideStore/SideStore/AppBootManager.swift"
+          BGREFRESH="SideStore/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift"
+
+          python3 builder/scripts/apply_gateway_diag.py "$GATEWAY"
+          python3 builder/scripts/apply_gateway_serialization.py "$GATEWAY"
+          python3 builder/scripts/apply_boot_transport_fix.py "$BOOT"
+          python3 builder/scripts/apply_background_auth_gate.py "$BGREFRESH"
+
+          grep -n 'GW-DIAG\|GW-SERIAL' "$GATEWAY"
+          grep -n 'SS-BOOT-FIX' "$BOOT"
+          grep -n 'SS-AUTH-GATE' "$BGREFRESH"
+
+          if grep -q 'getRustPlistString returned UDID:' "$GATEWAY"; then
+            echo 'Raw DeviceGateway UDID logging remains' >&2
+            exit 1
+          fi
+          if grep -q 'SUCCEEDED\. UDID:' "$BOOT"; then
+            echo 'Raw AppBootManager UDID logging remains' >&2
+            exit 1
+          fi
+
+      - name: Verify all local binary targets before SwiftPM
+        run: |
+          set -euo pipefail
+          test -d SideStore/Dependencies/minimuxer/DeviceGateway/LocalBinary/IDevice.xcframework
+          test -d SideStore/Dependencies/minimuxer/DeviceGateway/LocalBinary/OpenSSL.xcframework
+          test -d SideStore/Dependencies/minimuxer/LocalBinary/EMProxy.xcframework
+          grep -q 'path: "LocalBinary/IDevice.xcframework"' SideStore/Dependencies/minimuxer/DeviceGateway/Package.swift
+          grep -q 'path: "LocalBinary/OpenSSL.xcframework"' SideStore/Dependencies/minimuxer/DeviceGateway/Package.swift
+          grep -q 'path: "LocalBinary/EMProxy.xcframework"' SideStore/Dependencies/minimuxer/Package.swift
+
+      - name: Resolve Swift packages with clean artifact cache
+        working-directory: SideStore
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
+            if xcodebuild -resolvePackageDependencies -project AltStore.xcodeproj -scheme SideStore; then
+              echo "Package resolution succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Package resolution attempt $attempt failed"
+            sleep 2
+          done
+          exit 1
+
+      - name: Build comprehensive SideStore IPA
+        working-directory: SideStore
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/workflow.py build
+
+      - name: Verify IPA exists and hash it
+        run: |
+          set -euo pipefail
+          test -f SideStore/SideStore.ipa
+          ls -lh SideStore/SideStore.ipa
+          shasum -a 256 SideStore/SideStore.ipa
+
+      - name: Upload comprehensive IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-comprehensive-self-refresh
+          path: SideStore/SideStore.ipa
+          if-no-files-found: error
+
+      - name: Upload comprehensive build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-comprehensive-self-refresh-build-logs
+          path: SideStore/build/logs
+          if-no-files-found: ignore
