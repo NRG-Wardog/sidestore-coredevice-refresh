@@ -13,6 +13,7 @@ repo_root = p.resolve().parents[2]
 listener_mod = repo_root / "idevice/src/remote_pairing/mod.rs"
 tunnel_rs = repo_root / "idevice/src/remote_pairing/tunnel.rs"
 cdtunnel_rs = repo_root / "idevice/src/tunnel.rs"
+ffi_manifest = repo_root / "ffi/Cargo.toml"
 
 
 def apply_companion_patches() -> None:
@@ -22,7 +23,16 @@ def apply_companion_patches() -> None:
         raise SystemExit(f"RemotePairing tunnel.rs not found at {tunnel_rs}")
     if not cdtunnel_rs.exists():
         raise SystemExit(f"CDTunnel tunnel.rs not found at {cdtunnel_rs}")
+    if not ffi_manifest.exists():
+        raise SystemExit(f"IDevice FFI Cargo.toml not found at {ffi_manifest}")
 
+    # v10 needs the traditional Lockdown Pair request exported into the iOS
+    # static library. The upstream FFI already implements lockdownd_pair, but
+    # it is hidden unless the `pair` Cargo feature is enabled.
+    subprocess.run(
+        [sys.executable, str(script_dir / "apply_lockdown_pair_feature.py"), str(ffi_manifest)],
+        check=True,
+    )
     subprocess.run(
         [sys.executable, str(script_dir / "apply_source_bound_dynamic.py"), str(p)],
         check=True,
@@ -44,6 +54,10 @@ def apply_companion_patches() -> None:
     listener_text = listener_mod.read_text()
     tunnel_text = tunnel_rs.read_text()
     cdtunnel_text = cdtunnel_rs.read_text()
+    manifest_text = ffi_manifest.read_text()
+    default_start = manifest_text.find("default = [")
+    default_end = manifest_text.find("\n]", default_start)
+    default_block = manifest_text[default_start:default_end]
     companion_required = [
         (provider_text, "[SS-SOURCE-BOUND] en0-v4 source-bound connect active"),
         (provider_text, "ss_connect_dynamic_candidate(&label, target)"),
@@ -55,6 +69,8 @@ def apply_companion_patches() -> None:
         (tunnel_text, "[SS-OPENSSL-STAGE] CDTUNNEL_FAILED"),
         (cdtunnel_text, "[SS-CDTUNNEL-PARITY] single-record handshake write active"),
         (cdtunnel_text, "stream.write_all(&packet).await?"),
+        (manifest_text, "# SS-V10-LOCKDOWN-PAIR-FEATURE"),
+        (default_block, '"pair"'),
     ]
     missing = [marker for text, marker in companion_required if marker not in text]
     if missing:
@@ -73,7 +89,7 @@ if marker in s:
     if missing:
         raise SystemExit(f"OpenSSL transport marker present but patch incomplete; missing: {missing}")
     apply_companion_patches()
-    print("OpenSSL adaptive transport and companion protocol patches already present and verified")
+    print("OpenSSL adaptive transport, lockdown pairing, and companion protocol patches already present and verified")
     raise SystemExit(0)
 
 if "[SS-ADAPT] adaptive transport engine active" not in s:
@@ -201,4 +217,4 @@ if missing:
 if "connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key())" in patched:
     raise SystemExit("OpenSSL transport verification failed: active native TLS call remains")
 
-print("OpenSSL adaptive TLS-PSK + source-bound en0 + listener parity + CDTunnel record parity + stage diagnostics applied and verified")
+print("OpenSSL adaptive TLS-PSK + lockdown pair feature + source-bound en0 + listener parity + CDTunnel record parity + stage diagnostics applied and verified")
