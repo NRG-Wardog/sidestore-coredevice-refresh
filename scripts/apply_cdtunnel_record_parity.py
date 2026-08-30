@@ -7,21 +7,26 @@ if len(sys.argv) != 2:
 
 p = Path(sys.argv[1])
 s = p.read_text()
-marker = "[SS-CDTUNNEL-PARITY] single-record handshake write active"
+marker = "[SS-CDTUNNEL-PARITY] exact client handshake bytes active"
 
 if marker in s:
     required = [
+        'br#"{\\"type\\":\\"clientHandshakeRequest\\",\\"mtu\\":16000}"#',
         "let mut packet = Vec::with_capacity",
         "packet.extend_from_slice(CDTUNNEL_MAGIC)",
         "stream.write_all(&packet).await?",
     ]
     missing = [x for x in required if x not in s]
     if missing:
-        raise SystemExit(f"CDTunnel parity marker present but patch incomplete: {missing}")
-    print("CDTunnel single-record write already present and verified")
+        raise SystemExit(f"CDTunnel exact-byte marker present but patch incomplete: {missing}")
+    print("CDTunnel exact-byte single-record write already present and verified")
     raise SystemExit(0)
 
-old = '''        let body = serde_json::to_vec(&request)?;
+old = '''        let request = serde_json::json!({
+            "type": "clientHandshakeRequest",
+            "mtu": DEFAULT_MTU
+        });
+        let body = serde_json::to_vec(&request)?;
 
         stream.write_all(CDTUNNEL_MAGIC).await?;
         stream.write_all(&(body.len() as u16).to_be_bytes()).await?;
@@ -31,18 +36,18 @@ old = '''        let body = serde_json::to_vec(&request)?;
         debug!("Sent CDTunnel handshake request");
 '''
 
-new = '''        let body = serde_json::to_vec(&request)?;
-
-        // pymobiledevice3 emits the complete CDTunnel handshake packet through
-        // the TLS stream in one write. Keep the magic, length and JSON body in a
-        // single application-data write as CoreDevice's TCP tunnel path is
-        // sensitive to TLS/read boundaries on some iOS versions.
+new = '''        // Match the known-working TCP CDTunnel clients byte-for-byte. Both
+        // pymobiledevice3 and RemotePairingKit send the type field before mtu;
+        // serde_json without preserve_order can reorder object keys. Avoid any
+        // serializer-dependent ordering/spacing here and keep the entire frame in
+        // one TLS application-data write.
+        let body: &[u8] = br#"{\"type\":\"clientHandshakeRequest\",\"mtu\":16000}"#;
         let mut packet = Vec::with_capacity(CDTUNNEL_MAGIC.len() + 2 + body.len());
         packet.extend_from_slice(CDTUNNEL_MAGIC);
         packet.extend_from_slice(&(body.len() as u16).to_be_bytes());
-        packet.extend_from_slice(&body);
+        packet.extend_from_slice(body);
         tracing::error!(
-            "[SS-CDTUNNEL-PARITY] single-record handshake write active body_len={} packet_len={}",
+            "[SS-CDTUNNEL-PARITY] exact client handshake bytes active body_len={} packet_len={}",
             body.len(),
             packet.len()
         );
@@ -53,7 +58,7 @@ new = '''        let body = serde_json::to_vec(&request)?;
 '''
 
 if old not in s:
-    raise SystemExit("Could not locate split CDTunnel handshake write block")
+    raise SystemExit("Could not locate stock CDTunnel handshake block")
 
 s = s.replace(old, new, 1)
 p.write_text(s)
@@ -61,17 +66,23 @@ p.write_text(s)
 patched = p.read_text()
 required = [
     marker,
+    'br#"{\\"type\\":\\"clientHandshakeRequest\\",\\"mtu\\":16000}"#',
     "let mut packet = Vec::with_capacity",
     "packet.extend_from_slice(CDTUNNEL_MAGIC)",
     "packet.extend_from_slice(&(body.len() as u16).to_be_bytes())",
-    "packet.extend_from_slice(&body)",
+    "packet.extend_from_slice(body)",
     "stream.write_all(&packet).await?",
 ]
 missing = [x for x in required if x not in patched]
 if missing:
-    raise SystemExit(f"CDTunnel single-record write verification failed: {missing}")
+    raise SystemExit(f"CDTunnel exact-byte single-record verification failed: {missing}")
 
-if "stream.write_all(CDTUNNEL_MAGIC).await?;" in patched:
-    raise SystemExit("Split CDTunnel magic write still remains")
+for forbidden in [
+    "serde_json::to_vec(&request)?",
+    "stream.write_all(CDTUNNEL_MAGIC).await?;",
+    "stream.write_all(&body).await?;",
+]:
+    if forbidden in patched:
+        raise SystemExit(f"Old serializer/split-write CDTunnel path still remains: {forbidden}")
 
-print("Patched CDTunnel handshake to a single TLS application-data write")
+print("Patched CDTunnel handshake to exact known-working bytes in one TLS application-data write")
