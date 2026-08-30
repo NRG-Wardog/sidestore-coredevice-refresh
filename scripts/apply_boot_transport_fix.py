@@ -13,11 +13,21 @@ marker = "[SS-BOOT-FIX] strict transport validation active"
 
 def apply_v11_gateway_upgrade() -> None:
     script = Path(__file__).with_name("apply_v11_gateway_upgrade.py")
-    repo_root = p.parent.parent
-    gateway = repo_root / "Dependencies/minimuxer/DeviceGateway/idevice/IdeviceGateway.swift"
-    for required in [script, gateway]:
-        if not required.exists():
-            raise SystemExit(f"Missing required v11 gateway-upgrade input: {required}")
+    sidestore_root = p.parent.parent
+    candidates = [
+        # Full SideStore checkout with recursive submodules (build-sidestore job).
+        sidestore_root / "Dependencies/minimuxer/DeviceGateway/idevice/IdeviceGateway.swift",
+        # Independent minimuxer checkout beside SideStore (preflight job).
+        sidestore_root.parent / "minimuxer/DeviceGateway/idevice/IdeviceGateway.swift",
+    ]
+    gateway = next((candidate for candidate in candidates if candidate.exists()), None)
+    if not script.exists():
+        raise SystemExit(f"Missing required v11 gateway-upgrade script: {script}")
+    if gateway is None:
+        raise SystemExit(
+            "Missing required v11 gateway input; checked: "
+            + ", ".join(str(candidate) for candidate in candidates)
+        )
     subprocess.check_call([sys.executable, str(script), str(gateway)])
     patched_gateway = gateway.read_text()
     required_markers = [
