@@ -93,7 +93,6 @@ if old_set_ip not in s:
     raise SystemExit("Could not locate setDeviceEndpointIp assignment")
 s = s.replace(old_set_ip, new_set_ip, 1)
 
-# Add explicit pairing-type diagnostic once the file is classified.
 old_type = '''            self.pairingFileType = pairingType
             isRPPairing = (pairingType == .rppairing)
 '''
@@ -172,14 +171,13 @@ helper = r'''    // v9 preferred iOS 17.4+ path: use the traditional lockdown pa
         }
 
         debugLog("[SS-V9-COREDEVICE] COREDEVICE_TUNNEL_START service=com.apple.internal.devicecompute.CoreDeviceProxy")
-        var tunnelErr = tunnel_create_usb(lockdownProvider, &adapter, &handshake)
+        let tunnelErr = tunnel_create_usb(lockdownProvider, &adapter, &handshake)
         if let tunnelErr {
             let code = tunnelErr.pointee.code
             let subCode = tunnelErr.pointee.sub_code
             let msg = getErrorMessage(from: tunnelErr)
             debugLog("[SS-V9-COREDEVICE] COREDEVICE_TUNNEL_FAILED code=\(code) subCode=\(subCode) message=\(msg)")
             idevice_error_free(tunnelErr)
-            tunnelErr = nil
             invalidateConnection()
             let error = IdeviceGatewayError(.connectionFailed, reason: "CoreDeviceProxy tunnel failed: \(msg)")
             lastError = error
