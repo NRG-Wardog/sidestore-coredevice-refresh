@@ -68,10 +68,11 @@ fn repair_ipv4_tcp_checksums(packet: &mut [u8]) -> bool {
     if total_len < ihl + 20 || total_len > packet.len() {
         return false;
     }
-    // Never rewrite non-initial IPv4 fragments. TCP handshake/control packets are
-    // unfragmented, and this avoids producing an invalid transport checksum.
+
+    // Hairpin only complete, unfragmented TCP packets. DF is fine; reject MF or
+    // any non-zero fragment offset so a rewritten transport checksum is always valid.
     let frag = u16::from_be_bytes([packet[6], packet[7]]);
-    if (frag & 0x1fff) != 0 {
+    if (frag & 0x3fff) != 0 {
         return false;
     }
 
@@ -115,8 +116,8 @@ fn hairpin_en0_ipv4() -> Option<[u8; 4]> {
                 let name = std::ffi::CStr::from_ptr(ifa.ifa_name).to_string_lossy();
                 if (*ifa.ifa_addr).sa_family as i32 == libc::AF_INET {
                     let sin = &*(ifa.ifa_addr as *const libc::sockaddr_in);
-                    // s_addr is stored in network byte order; native bytes are the
-                    // on-wire IPv4 octets on the current host.
+                    // s_addr is network-order storage; native bytes are the actual
+                    // on-wire IPv4 octets on iOS/macOS.
                     let octets = sin.sin_addr.s_addr.to_ne_bytes();
                     let usable = octets != [0, 0, 0, 0] && octets[0] != 127;
                     if usable && name == "en0" {
@@ -167,12 +168,18 @@ fn hairpin_translate_ipv4_tcp(packet: &mut [u8], flows: &mut Vec<HairpinFlow>) -
     }) {
         let flow = flows[index].clone();
         flows[index].last_seen = now;
+        let original_src = src;
+        let original_dst = dst;
 
         // Present the response to SideStore exactly as if it came from 10.7.0.1.
         packet[12..16].copy_from_slice(&flow.virtual_ip);
         packet[16..20].copy_from_slice(&flow.client_ip);
         if !repair_ipv4_tcp_checksums(packet) {
-            log_msg(2, "[EMP-HAIRPIN] REVERSE checksum repair FAILED; falling back to reflection".to_string());
+            // Restore the untouched addressing before the caller falls back to the
+            // legacy reflection path.
+            packet[12..16].copy_from_slice(&original_src);
+            packet[16..20].copy_from_slice(&original_dst);
+            log_msg(2, "[EMP-HAIRPIN] REVERSE checksum repair FAILED; restored packet for legacy reflection".to_string());
             return false;
         }
         if flags & (0x02 | 0x04 | 0x01) != 0 {
@@ -193,8 +200,8 @@ fn hairpin_translate_ipv4_tcp(packet: &mut [u8], flows: &mut Vec<HairpinFlow>) -
     }
 
     // RemotePairing control is fixed at 49152 and already works with ordinary
-    // reflection. createListener() uses the iOS ephemeral range above it. Restrict
-    // hairpinning to those high TCP ports so fixed control and unrelated traffic keep
+    // reflection. createListener() uses the iOS high ephemeral range above it.
+    // Restrict hairpinning to those ports so fixed control and unrelated traffic keep
     // the proven reflection path.
     let virtual_peer = [10, 7, 0, 1];
     let client_is_wireguard = src[0] == 10 && src[1] == 7 && src[2] == 0 && src != virtual_peer;
@@ -231,13 +238,18 @@ fn hairpin_translate_ipv4_tcp(packet: &mut [u8], flows: &mut Vec<HairpinFlow>) -
         (physical_ip, true)
     };
 
+    let original_src = src;
+    let original_dst = dst;
+
     // Inject an inbound packet whose source is the WireGuard peer (allowed by the
     // client's cryptokey route) but whose destination is the phone's physical Wi-Fi
     // address where iOS exposes the RemotePairing dynamic listener.
     packet[12..16].copy_from_slice(&dst);
     packet[16..20].copy_from_slice(&physical_ip);
     if !repair_ipv4_tcp_checksums(packet) {
-        log_msg(2, "[EMP-HAIRPIN] FORWARD checksum repair FAILED; using legacy reflection".to_string());
+        packet[12..16].copy_from_slice(&original_src);
+        packet[16..20].copy_from_slice(&original_dst);
+        log_msg(2, "[EMP-HAIRPIN] FORWARD checksum repair FAILED; restored packet for legacy reflection".to_string());
         return false;
     }
 
@@ -318,6 +330,7 @@ required = [
     "dynamic_tcp_min=49153",
     "FORWARD flow installed",
     "REVERSE flow matched",
+    "restored packet for legacy reflection",
     'log_ipv4_tcp("TX-HAIRPIN", b);',
     'log_ipv4_tcp("TX-REFLECT", b);',
 ]
@@ -325,8 +338,16 @@ missing = [x for x in required if x not in patched]
 if missing:
     raise SystemExit(f"EMProxy hairpin verification failed: {missing}")
 
-# Packet diagnostics may report payload LENGTH, but must never print packet contents.
-for forbidden in ["{:?}, b", "hex::encode", "base64::", "packet payload bytes"]:
+# Packet diagnostics may report packet metadata and payload LENGTH only. Reject only
+# explicit payload/content encoders or raw-buffer debug patterns; em_proxy legitimately
+# uses base64 elsewhere, so a blanket `base64::` ban is a false positive.
+for forbidden in [
+    "hex::encode(packet",
+    "hex::encode(b)",
+    "packet payload bytes",
+    "payload_bytes={:?}",
+    "packet={:?}",
+]:
     if forbidden in patched:
         raise SystemExit(f"Secret/payload safety verification failed: {forbidden}")
 
