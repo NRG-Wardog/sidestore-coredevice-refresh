@@ -12,6 +12,7 @@ script_dir = Path(__file__).resolve().parent
 repo_root = p.resolve().parents[2]
 listener_mod = repo_root / "idevice/src/remote_pairing/mod.rs"
 tunnel_rs = repo_root / "idevice/src/remote_pairing/tunnel.rs"
+cdtunnel_rs = repo_root / "idevice/src/tunnel.rs"
 
 
 def apply_companion_patches() -> None:
@@ -19,6 +20,8 @@ def apply_companion_patches() -> None:
         raise SystemExit(f"RemotePairing mod.rs not found at {listener_mod}")
     if not tunnel_rs.exists():
         raise SystemExit(f"RemotePairing tunnel.rs not found at {tunnel_rs}")
+    if not cdtunnel_rs.exists():
+        raise SystemExit(f"CDTunnel tunnel.rs not found at {cdtunnel_rs}")
 
     subprocess.run(
         [sys.executable, str(script_dir / "apply_listener_parity.py"), str(listener_mod)],
@@ -28,9 +31,14 @@ def apply_companion_patches() -> None:
         [sys.executable, str(script_dir / "apply_openssl_stage_diag.py"), str(tunnel_rs)],
         check=True,
     )
+    subprocess.run(
+        [sys.executable, str(script_dir / "apply_cdtunnel_record_parity.py"), str(cdtunnel_rs)],
+        check=True,
+    )
 
     listener_text = listener_mod.read_text()
     tunnel_text = tunnel_rs.read_text()
+    cdtunnel_text = cdtunnel_rs.read_text()
     companion_required = [
         (listener_text, "[SS-LISTENER] pymobiledevice3 listener parity active"),
         (listener_text, '"peerConnectionsInfo"'),
@@ -38,6 +46,8 @@ def apply_companion_patches() -> None:
         (tunnel_text, "[SS-OPENSSL-STAGE] TLS_HANDSHAKE_SUCCESS"),
         (tunnel_text, "[SS-OPENSSL-STAGE] CDTUNNEL_SUCCESS"),
         (tunnel_text, "[SS-OPENSSL-STAGE] CDTUNNEL_FAILED"),
+        (cdtunnel_text, "[SS-CDTUNNEL-PARITY] single-record handshake write active"),
+        (cdtunnel_text, "stream.write_all(&packet).await?"),
     ]
     missing = [marker for text, marker in companion_required if marker not in text]
     if missing:
@@ -119,8 +129,7 @@ new_start = '''        tracing::error!(
         );
         // Use OpenSSL's TLS 1.2 PSK implementation, matching pymobiledevice3.
         // Companion patches applied by this builder also match pymobiledevice3's
-        // createListener peerConnectionsInfo metadata and split TLS/CDTunnel logs,
-        // so one runtime test covers transport, listener policy, TLS and RSD.
+        // createListener metadata and CDTunnel TLS record boundaries.
         let tunnel = match tokio::time::timeout(
             std::time::Duration::from_secs(7),
             connect_tls_psk_tunnel(tunnel_stream, rpc.encryption_key()),
@@ -181,4 +190,4 @@ if missing:
 if "connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key())" in patched:
     raise SystemExit("OpenSSL transport verification failed: active native TLS call remains")
 
-print("OpenSSL adaptive TLS-PSK + pymobiledevice3 listener parity + stage diagnostics applied and verified")
+print("OpenSSL adaptive TLS-PSK + listener parity + CDTunnel record parity + stage diagnostics applied and verified")
