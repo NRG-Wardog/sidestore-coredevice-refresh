@@ -1,2 +1,2 @@
-2026-08-30T09:40:00+03:00
-v9 CoreDeviceProxy lockdown rebuild after Swift compile fix: remove invalid optional shadow reassignment in CoreDevice tunnel error handling; architecture unchanged.
+2026-08-30T10:18:00+03:00
+v10 automatic Lockdown PairRecord bootstrap over 10.7.0.1:62078, persistent local cache, and CoreDeviceProxy transport for imported RP pairing files.
