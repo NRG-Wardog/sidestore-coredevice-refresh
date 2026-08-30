@@ -84,8 +84,61 @@ if missing:
 if "manager.isOverridePeerIpReachable ? overrideIp : nil" in verified_net:
     raise SystemExit("Local-VPN override is still gated by startup reachability")
 
+# Rust's idevice logger is guarded by std::sync::Once. SideStore's first call is
+# normally setLogging(false), which permanently initializes it with zero output
+# layers and suppresses the TLS/CDTunnel stage diagnostics in release builds.
+# Always install only the ERROR layer. Our forensic events use tracing::error!
+# and intentionally redact PSKs, pairing keys, UDIDs, and packet bodies.
+gateway = p.parent / "DeviceGateway" / "idevice" / "IdeviceGateway.swift"
+if not gateway.exists():
+    raise SystemExit(f"Could not find IdeviceGateway.swift at {gateway}")
+
+gw = gateway.read_text()
+gw_marker = "[SS-FORENSIC-LOG] Rust error-stage tracing forced active"
+old_logging = '''    public func setLogging(_ enabled: Bool) {
+        DeviceGatewayLogging.setLogging(enabled)
+        debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
+        idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 1) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        #if DEBUG
+        // just comment/uncomment to override above set logging level during local debugging
+//        idevice_init_logger(IdeviceLogLevel(rawValue: 4), IdeviceLogLevel(rawValue: 0), nil)
+        #endif
+    }'''
+new_logging = '''    public func setLogging(_ enabled: Bool) {
+        DeviceGatewayLogging.setLogging(enabled)
+        debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
+
+        // idevice_init_logger is guarded by Rust's std::sync::Once. The first
+        // disabled call would otherwise make later diagnostics impossible.
+        _ = idevice_init_logger(
+            IdeviceLogLevel(rawValue: 1),
+            IdeviceLogLevel(rawValue: 0),
+            nil
+        )
+        debugLog("[SS-FORENSIC-LOG] Rust error-stage tracing forced active; requestedVerbose=\(enabled)")
+    }'''
+
+if gw_marker not in gw:
+    if old_logging not in gw:
+        raise SystemExit("Could not locate IdeviceGateway.setLogging implementation")
+    gw = gw.replace(old_logging, new_logging, 1)
+    gateway.write_text(gw)
+
+verified_gw = gateway.read_text()
+required_gw = [
+    gw_marker,
+    "IdeviceLogLevel(rawValue: 1)",
+    "requestedVerbose=",
+]
+missing = [x for x in required_gw if x not in verified_gw]
+if missing:
+    raise SystemExit(f"Forensic logger verification failed: {missing}")
+if "enabled ? IdeviceLogLevel(rawValue: 1) : IdeviceLogLevel(rawValue: 0)" in verified_gw:
+    raise SystemExit("Forensic logger is still vulnerable to disabled-first initialization")
+
 if package_changed:
     print("Patched minimuxer Package.swift to use exactly one local diagnostic EMProxy XCFramework")
 else:
     print("Minimuxer Package.swift already uses exactly one local EMProxy target")
 print("Patched local-VPN override handling to retain the explicit peer during startup")
+print("Forced privacy-safe Rust error-stage diagnostics for deterministic TLS/CDTunnel evidence")
