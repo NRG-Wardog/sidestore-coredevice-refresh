@@ -15,6 +15,7 @@ if marker in s:
         "let mut packet = Vec::with_capacity",
         "packet.extend_from_slice(CDTUNNEL_MAGIC)",
         "stream.write_all(&packet).await?",
+        "[SS-CDTUNNEL-PARITY] single-record handshake write active",
     ]
     missing = [x for x in required if x not in s]
     if missing:
@@ -41,6 +42,7 @@ new = '''        // Match the known-working TCP CDTunnel clients byte-for-byte. 
         // serde_json without preserve_order can reorder object keys. Avoid any
         // serializer-dependent ordering/spacing here and keep the entire frame in
         // one TLS application-data write.
+        // [SS-CDTUNNEL-PARITY] single-record handshake write active
         let body: &[u8] = br#"{\"type\":\"clientHandshakeRequest\",\"mtu\":16000}"#;
         let mut packet = Vec::with_capacity(CDTUNNEL_MAGIC.len() + 2 + body.len());
         packet.extend_from_slice(CDTUNNEL_MAGIC);
@@ -66,6 +68,7 @@ p.write_text(s)
 patched = p.read_text()
 required = [
     marker,
+    "[SS-CDTUNNEL-PARITY] single-record handshake write active",
     'br#"{\\"type\\":\\"clientHandshakeRequest\\",\\"mtu\\":16000}"#',
     "let mut packet = Vec::with_capacity",
     "packet.extend_from_slice(CDTUNNEL_MAGIC)",
