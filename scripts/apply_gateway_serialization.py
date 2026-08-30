@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -7,6 +8,25 @@ if len(sys.argv) != 2:
 
 p = Path(sys.argv[1])
 s = p.read_text()
+
+
+def apply_v9_coredevice() -> None:
+    script = Path(__file__).with_name("apply_coredevice_lockdown.py")
+    if not script.exists():
+        raise SystemExit(f"Missing required v9 CoreDevice patch script: {script}")
+    subprocess.check_call([sys.executable, str(script), str(p)])
+    patched = p.read_text()
+    required = [
+        "[SS-V9-COREDEVICE]",
+        "RP_FILE_CANNOT_USE_COREDEVICE_PROXY",
+        "idevice_tcp_provider_new",
+        "tunnel_create_usb",
+        "COREDEVICE_TUNNEL_SUCCESS",
+    ]
+    missing = [x for x in required if x not in patched]
+    if missing:
+        raise SystemExit(f"v9 CoreDevice integration verification failed; missing: {missing}")
+
 
 marker = "[GW-SERIAL]"
 if marker in s:
@@ -19,7 +39,8 @@ if marker in s:
     missing = [x for x in required if x not in s]
     if missing:
         raise SystemExit(f"Gateway serialization marker present but incomplete; missing: {missing}")
-    print("Gateway serialization patch already present and verified")
+    apply_v9_coredevice()
+    print("Gateway serialization + v9 CoreDeviceProxy patches already present and verified")
     raise SystemExit(0)
 
 anchor = '''    private var remotePairingPort: UInt16 = MinimuxerConstants.remotePairingPort
@@ -35,7 +56,6 @@ if anchor not in s:
     raise SystemExit("Could not locate gateway state anchor")
 s = s.replace(anchor, replacement, 1)
 
-# Serialize endpoint changes because they free cached adapter/handshake state.
 old = '''    public func setRemotePairingPort(_ port: UInt16) {
         debugLog("[IdeviceGateway] setRemotePairingPort(\\(port)) called")'''
 new = '''    public func setRemotePairingPort(_ port: UInt16) {
@@ -152,4 +172,5 @@ missing = [x for x in required if x not in patched]
 if missing:
     raise SystemExit(f"Gateway serialization verification failed; missing: {missing}")
 
-print("Gateway RPPairing/service serialization patch applied and verified")
+apply_v9_coredevice()
+print("Gateway serialization + v9 CoreDeviceProxy lockdown transport applied and verified")
