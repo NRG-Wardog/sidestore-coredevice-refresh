@@ -133,7 +133,7 @@ recv_new = """                Ok((size, endpoint)) => {
                         log_msg(
                             2,
                             format!(
-                                "[EMP-DIAG] UDP RX packet={} bytes={} endpoint={}",
+                                "[EMP-DIAG] UDP RX packet_index={} bytes={} endpoint={}",
                                 udp_rx_packets,
                                 size,
                                 endpoint
