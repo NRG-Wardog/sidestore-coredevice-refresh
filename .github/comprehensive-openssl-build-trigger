@@ -1,2 +1,2 @@
-2026-08-30T10:18:00+03:00
-v10 automatic Lockdown PairRecord bootstrap over 10.7.0.1:62078, persistent local cache, and CoreDeviceProxy transport for imported RP pairing files.
+2026-08-30T10:46:00+03:00
+v10 rebuild: active Cargo default feature detection fixed; Lockdown pairing feature, PairRecord bootstrap, cache, and CoreDeviceProxy path unchanged.
