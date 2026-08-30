@@ -16,6 +16,7 @@ if marker in s:
         "nat46_translate_v6_to_v4",
         "TX-NAT46-V6",
         "TX-NAT46-V4",
+        "EMP-NAT46-GUARD",
         "peer_v6=fd00:7::1",
         "dynamic_tcp_min=49153 legacy_control=49152",
         "legacy_lockdown=62078",
@@ -34,10 +35,10 @@ helper = r'''
 //
 // CoreDevice's createListener TCP socket is IPv6-only on the affected device:
 // direct en0 IPv6 reaches TLS while en0 IPv4 and the IPv4 utun reflection never
-// receive SYN/ACK.  SideStore itself still dials the historical IPv4 peer
-// 10.7.0.1.  Translate only RemotePairing dynamic high-port flows to an IPv6
+// receive SYN/ACK. SideStore itself still dials the historical IPv4 peer
+// 10.7.0.1. Translate only RemotePairing dynamic high-port flows to an IPv6
 // packet whose synthetic peer is fd00:7::1 and whose destination is the phone's
-// en0 IPv6 address.  Replies are translated back to the original IPv4 flow.
+// en0 IPv6 address. Replies are translated back to the original IPv4 flow.
 //
 // WireGuard must therefore include:
 //   Interface Address: fd00:7::10/64
@@ -64,6 +65,7 @@ const NAT46_PEER_V6: [u8; 16] = [
 ];
 const NAT46_VIRTUAL_V4: [u8; 4] = [10, 7, 0, 1];
 const NAT46_DYNAMIC_TCP_MIN: u16 = 49153;
+const NAT46_CONTROL_PORT: u16 = 49152;
 const NAT46_LEGACY_LOCKDOWN_PORT: u16 = 62078;
 
 fn nat46_checksum_add(mut sum: u32, bytes: &[u8]) -> u32 {
@@ -278,32 +280,58 @@ fn nat46_translate_v4_to_v6(packet: &[u8], flows: &mut Vec<Nat46Flow>) -> Option
     let dst_port = u16::from_be_bytes([packet[ihl + 2], packet[ihl + 3]]);
     let flags = packet[ihl + 13];
     let client_is_wireguard = src[0] == 10 && src[1] == 7 && src[2] == 0 && src != NAT46_VIRTUAL_V4;
+
+    // Fixed listener replies target ephemeral high ports. Destination-port-only
+    // classification therefore corrupts the known-good control/lockdown path.
+    // Exclude fixed server source ports unconditionally.
     if !client_is_wireguard
         || dst != NAT46_VIRTUAL_V4
         || dst_port < NAT46_DYNAMIC_TCP_MIN
         || dst_port == NAT46_LEGACY_LOCKDOWN_PORT
+        || src_port == NAT46_CONTROL_PORT
+        || src_port == NAT46_LEGACY_LOCKDOWN_PORT
     {
         return None;
     }
 
     let now = std::time::Instant::now();
     flows.retain(|flow| now.duration_since(flow.last_seen).as_secs() < 120);
-    let index = if let Some(index) = flows.iter().position(|flow| {
+    let existing_index = flows.iter().position(|flow| {
         flow.client_v4 == src
             && flow.virtual_v4 == dst
             && flow.client_port == src_port
             && flow.service_port == dst_port
-    }) {
+    });
+
+    // A new NAT46 mapping may only be created by the initiating SYN. SYN|ACK,
+    // FIN, RST, and stray ACK packets to ephemeral high ports belong to another
+    // reflected flow and must stay on IPv4.
+    if existing_index.is_none() && (flags & 0x02 == 0 || flags & 0x10 != 0) {
+        if flags & (0x02 | 0x04 | 0x01) != 0 {
+            log_msg(
+                2,
+                format!(
+                    "[EMP-NAT46-GUARD] bypass non-initiating high-port packet src={}:{} dst={}:{} flags=0x{:02x}",
+                    nat46_ipv4_text(src),
+                    src_port,
+                    nat46_ipv4_text(dst),
+                    dst_port,
+                    flags
+                ),
+            );
+        }
+        return None;
+    }
+
+    let index = if let Some(index) = existing_index {
         flows[index].last_seen = now;
         index
     } else {
         let Some(physical_v6) = nat46_en0_ipv6() else {
-            if flags & 0x02 != 0 {
-                log_msg(
-                    2,
-                    "[EMP-NAT46] FORWARD blocked: no usable en0/en* IPv6 address; legacy IPv4 reflection will be used".to_string(),
-                );
-            }
+            log_msg(
+                2,
+                "[EMP-NAT46] FORWARD blocked: no usable en0/en* IPv6 address; legacy IPv4 reflection will be used".to_string(),
+            );
             return None;
         };
         flows.push(Nat46Flow {
@@ -593,6 +621,9 @@ required = [
     "nat46_translate_v6_to_v4",
     "TX-NAT46-V6",
     "TX-NAT46-V4",
+    "EMP-NAT46-GUARD",
+    "src_port == NAT46_CONTROL_PORT",
+    "flags & 0x10 != 0",
     "peer_v6=fd00:7::1",
     "local_v6=fd00:7::10/64",
     "[EMP-HAIRPIN]",
@@ -617,4 +648,4 @@ for forbidden in [
     if forbidden in patched:
         raise SystemExit(f"Secret/payload safety verification failed: {forbidden}")
 
-print("EMProxy IPv4-to-IPv6 dynamic-listener bridge applied and verified")
+print("EMProxy IPv4-to-IPv6 dynamic-listener bridge with fixed-flow guard applied and verified")
