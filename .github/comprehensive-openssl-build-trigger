@@ -1,2 +1,2 @@
-2026-08-30T06:28:00+03:00
-v7 forensic NAT46: preserve fixed IPv4 control/lockdown reflection, translate only dynamic RemotePairing high ports to the phone's en0 IPv6 address through synthetic peer fd00:7::1, translate replies back to 10.7.0.1, and force privacy-safe Rust error-stage diagnostics despite disabled-first logger initialization.
+2026-08-30T06:59:00+03:00
+v7 final forensic NAT46 rebuild: create NAT46 state only from a new SYN without ACK, exclude replies sourced by fixed control 49152 or lockdown 62078, preserve their proven IPv4 reflection, bridge only genuine dynamic CoreDevice listeners over fd00:7::1, and retain privacy-safe Rust stage diagnostics.
