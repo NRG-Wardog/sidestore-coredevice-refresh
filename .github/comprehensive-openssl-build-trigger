@@ -1,2 +1,2 @@
-2026-08-30T05:43:00+03:00
-rebuild after v4 on-device evidence: source-bound en0-v4 times out and physical hairpin never receives reverse SYN/ACK; use the proven 49152 virtual-peer reflection semantics for createListener dynamic high TCP ports as well
+2026-08-30T06:01:00+03:00
+rebuild after v5 on-device evidence: dynamic reflection confirms createListener high ports are not bound to utun; direct en0 reaches TLS then closes during CDTunnel. Match known-working clients byte-for-byte with {"type":"clientHandshakeRequest","mtu":16000} in one TLS record.
