@@ -1,2 +1,2 @@
-2026-08-30T04:52:00+03:00
-rebuild after on-device evidence: preserve explicit local VPN peer + keep 49152 control responses on legacy reflection while hairpinning only true dynamic listeners
+2026-08-30T05:10:00+03:00
+rebuild after on-device evidence: retain explicit local VPN peer + correct 49152 reflection + match pymobiledevice3 CDTunnel single TLS-record handshake write
