@@ -1,2 +1,2 @@
-2026-08-30T04:12:00+03:00
-comprehensive OpenSSL self-refresh build: adaptive transport + CoreDevice listener parity + stateful EMProxy hairpin + serialized gateway + boot/auth correctness
+2026-08-30T04:18:00+03:00
+comprehensive OpenSSL self-refresh build retry: verifier false-positive removed; adaptive transport + listener parity + EMProxy hairpin + OpenSSL + gateway/app correctness
