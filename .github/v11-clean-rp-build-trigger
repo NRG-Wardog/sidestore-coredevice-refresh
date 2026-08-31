@@ -1,0 +1,5 @@
+2026-08-31T16:45:00+03:00
+v11 clean RemotePairingKit build authorized after architecture isolation.
+RP backend forced to libimobiledevice.
+RemotePairingKit pinned e72cd0272ab7b4548b5cd22ed4a81008b2b52717.
+Only EMProxy nonblocking patch is rebuilt; legacy IDevice/NAT46/Lockdown paths are excluded.
