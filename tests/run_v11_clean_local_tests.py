@@ -28,27 +28,27 @@ api = minimuxer / "Sources" / "MinimuxerApi.swift"
 limd = minimuxer / "DeviceGateway" / "libimobiledevice" / "LibimobiledeviceGateway.swift"
 emp = emproxy / "src" / "lib.rs"
 
-run(scripts[0], api)
-run(scripts[1], limd)
-run(scripts[2], minimuxer)
-run(scripts[3], emp)
-
-# Second pass proves every patch is idempotent before macOS build minutes are spent.
-run(scripts[0], api)
-run(scripts[1], limd)
-run(scripts[2], minimuxer)
-run(scripts[3], emp)
+for _ in range(2):
+    run(scripts[0], api)
+    run(scripts[1], limd)
+    run(scripts[2], minimuxer)
+    run(scripts[3], emp)
 
 checks = {
     api: [
         "[SS-V11-CLEAN-RP]",
         "currentBackend: GatewayBackend = .libimobiledevice",
+        "let requestedBackend = backend ?? .libimobiledevice",
+        "let resolvedBackend: GatewayBackend = .libimobiledevice",
         "previousBackend == resolvedBackend",
+        "overriding requested backend=",
     ],
     limd: [
         "CONTROL_PAIR_VERIFY_SUCCESS",
         "DYNAMIC_CANDIDATES",
+        "DYNAMIC_CONNECT_START",
         "DYNAMIC_CONNECT_SUCCESS",
+        "STRICT_UDID_QUERY_START",
         "STRICT_UDID_QUERY_SUCCESS",
         "ssV11DynamicTunnelHosts",
     ],
@@ -70,7 +70,11 @@ for path, required in checks.items():
         raise SystemExit(f"verification failed for {path}: {missing}")
 
 for path, forbidden in {
-    api: ["currentBackend: GatewayBackend = .idevice", "currentBackend == resolvedBackend"],
+    api: [
+        "currentBackend: GatewayBackend = .idevice",
+        "currentBackend == resolvedBackend",
+        "let resolvedBackend = backend ?? currentBackend",
+    ],
     limd: ["SS-V10-LOCKDOWN-BOOTSTRAP", "SS-V9-COREDEVICE", "SS-ADAPT", "SS-SOURCE-BOUND"],
     minimuxer / "DeviceGateway" / "Package.swift": [
         'path: "LocalBinary/IDevice.xcframework"',
