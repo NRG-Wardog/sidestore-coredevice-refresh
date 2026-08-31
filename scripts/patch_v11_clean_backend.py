@@ -35,20 +35,19 @@ old_shared = '''        let resolvedBackend = backend ?? currentBackend
         return createInstance(backend: resolvedBackend)
 '''
 new_shared = '''        let previousBackend = currentBackend
-        let resolvedBackend = backend ?? .libimobiledevice
+        let requestedBackend = backend ?? .libimobiledevice
+        let resolvedBackend: GatewayBackend = .libimobiledevice
         let resolvedPort = remotePairingPort ?? currentRemotePairingPort
+
+        if requestedBackend != .libimobiledevice {
+            debugLog("[SS-V11-CLEAN-RP] overriding requested backend=\\(requestedBackend.rawValue) with libimobiledevice")
+        }
 
         currentBackend = resolvedBackend
         currentRemotePairingPort = resolvedPort
 
         debugLog("[SS-V11-CLEAN-RP] shared backend=\\(resolvedBackend.rawValue) previous=\\(previousBackend.rawValue) port=\\(resolvedPort)")
-
-        switch resolvedBackend {
-        case .libimobiledevice:
-            LibimobiledeviceGateway.shared.setRemotePairingPort(resolvedPort)
-        case .idevice:
-            IdeviceGateway.shared.setRemotePairingPort(resolvedPort)
-        }
+        LibimobiledeviceGateway.shared.setRemotePairingPort(resolvedPort)
 
         // The upstream implementation assigns currentBackend before comparing it,
         // making the cached-instance check tautological. A backend switch could
@@ -71,8 +70,10 @@ required = [
     marker,
     "currentBackend: GatewayBackend = .libimobiledevice",
     "let previousBackend = currentBackend",
-    "let resolvedBackend = backend ?? .libimobiledevice",
+    "let requestedBackend = backend ?? .libimobiledevice",
+    "let resolvedBackend: GatewayBackend = .libimobiledevice",
     "previousBackend == resolvedBackend",
+    "overriding requested backend=",
     "creating fresh Minimuxer instance",
 ]
 missing = [x for x in required if x not in patched]
@@ -81,6 +82,7 @@ if missing:
 for forbidden in [
     "currentBackend: GatewayBackend = .idevice",
     "if let cached = cachedInstance, currentBackend == resolvedBackend",
+    "let resolvedBackend = backend ?? currentBackend",
 ]:
     if forbidden in patched:
         raise SystemExit(f"v11 clean backend verification failed; stale code remains: {forbidden}")
