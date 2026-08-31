@@ -1,2 +1,2 @@
-2026-08-30T11:34:00+03:00
-v11 rebuild: support both independent minimuxer preflight checkout and recursive SideStore submodule checkout; split provider architecture unchanged.
+2026-08-31T15:18:00+03:00
+v11 rebuild: EMProxy UDP timeout busy-loop fix. Diagnostic wrapper now applies nonblocking socket setup once, removes per-loop SO_RCVTIMEO, and sleeps on WouldBlock/TimedOut.
