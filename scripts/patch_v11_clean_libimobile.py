@@ -34,20 +34,22 @@ private func ssV11DynamicTunnelHosts(controlHost: String) -> [String] {
                String(cString: namePtr) == "en0",
                let addr = ifa.ifa_addr {
                 let family = Int32(addr.pointee.sa_family)
-                if family == AF_INET {
-                    var sin = UnsafeRawPointer(addr).assumingMemoryBound(to: sockaddr_in.self).pointee
-                    var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                    if inet_ntop(AF_INET, &sin.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
-                        hosts.append(String(cString: buffer))
+                if family == AF_INET || family == AF_INET6 {
+                    var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    let rc = buffer.withUnsafeMutableBufferPointer { hostBuffer in
+                        getnameinfo(
+                            addr,
+                            socklen_t(addr.pointee.sa_len),
+                            hostBuffer.baseAddress,
+                            socklen_t(hostBuffer.count),
+                            nil,
+                            0,
+                            NI_NUMERICHOST
+                        )
                     }
-                } else if family == AF_INET6 {
-                    var sin6 = UnsafeRawPointer(addr).assumingMemoryBound(to: sockaddr_in6.self).pointee
-                    var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-                    if inet_ntop(AF_INET6, &sin6.sin6_addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
+                    if rc == 0 {
                         let ip = String(cString: buffer)
-                        if ip.lowercased().hasPrefix("fe80:") {
-                            hosts.append("\(ip)%en0")
-                        } else if ip != "::1" {
+                        if !ip.isEmpty && ip != "127.0.0.1" && ip != "::1" {
                             hosts.append(ip)
                         }
                     }
