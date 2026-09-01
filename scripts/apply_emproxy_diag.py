@@ -10,12 +10,13 @@ target = sys.argv[1]
 here = Path(__file__).resolve().parent
 base = here / "apply_emproxy_diag_base.py"
 nonblocking = here / "apply_emproxy_nonblocking.py"
+recovery = here / "apply_emproxy_rebind_recovery.py"
 
-if not base.exists():
-    raise SystemExit(f"missing base EMProxy diagnostic patch: {base}")
-if not nonblocking.exists():
-    raise SystemExit(f"missing EMProxy nonblocking patch: {nonblocking}")
+for required in (base, nonblocking, recovery):
+    if not required.exists():
+        raise SystemExit(f"missing EMProxy patch: {required}")
 
 subprocess.check_call([sys.executable, str(base), target])
 subprocess.check_call([sys.executable, str(nonblocking), target])
-print("EMProxy diagnostics + nonblocking UDP fix applied and verified")
+subprocess.check_call([sys.executable, str(recovery), target])
+print("EMProxy diagnostics + nonblocking UDP + ENOTCONN rebind recovery applied and verified")
