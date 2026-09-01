@@ -2,6 +2,10 @@ name: Build SideStore v14 Protocol Matrix
 
 on:
   workflow_dispatch:
+  push:
+    branches: [v14-protocol-matrix]
+    paths:
+      - ".github/v14-build-trigger"
 
 permissions:
   contents: read
