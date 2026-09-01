@@ -1,0 +1,3 @@
+SideStore v13 gated build
+reason: v12 lockdownd acknowledged only four-byte plist prefix then reset
+architecture: combined frame write + QueryType-first + serialized FFI + bounded payload metadata
