@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SIDESTORE_REF: f3a18d61efae65b05dc935fff75b89225efdb0ff
-  MINIMUXER_REF: 71b957efc65e4687a94b1f1dac27fb3344c22936
+  SIDESTORE_REF: 3dc127ee6f17aa20f0863becd07c0c6043d8dddd
+  MINIMUXER_REF: ef8a54ccbd08a0b679a556df20121c1e7e13be7e
   IDEVICE_REF: 61c27041f8d3d0be4cc3e046ee04501649c9d66e
   EMPROXY_REF: 6e117e140ca7cff4ff106bdefa18147552a0e592
 
@@ -31,9 +31,7 @@ jobs:
       - name: Run Linux source, Rust, Swift and privacy barriers
         env:
           MODE: preflight
-        run: |
-          gzip -dc builder/scripts/v14_ci.sh.gz >/tmp/v14_ci.sh
-          bash /tmp/v14_ci.sh
+        run: bash builder/scripts/v14_ci.sh
       - uses: actions/upload-artifact@v4
         with:
           name: SideStore-v14-preflight
@@ -54,9 +52,7 @@ jobs:
       - name: Build native libraries and SideStore v14 IPA
         env:
           MODE: build
-        run: |
-          gzip -dc builder/scripts/v14_ci.sh.gz >/tmp/v14_ci.sh
-          bash /tmp/v14_ci.sh
+        run: bash builder/scripts/v14_ci.sh
       - uses: actions/upload-artifact@v4
         with:
           name: SideStore-v14-protocol-matrix
