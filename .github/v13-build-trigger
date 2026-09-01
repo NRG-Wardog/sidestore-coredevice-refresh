@@ -1,3 +1,4 @@
 SideStore v13 gated build
-reason: v12 lockdownd acknowledged only four-byte plist prefix then reset
+attempt: 2
+reason: corrected multiline serial queue verification before macOS build
 architecture: combined frame write + QueryType-first + serialized FFI + bounded payload metadata
