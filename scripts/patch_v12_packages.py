@@ -6,7 +6,10 @@ import re
 import sys
 
 MARKER = "[SS-V12-HYBRID] retaining explicit LocalVPN peer"
-RPK_REV = "e72cd0272ab7b4548b5cd22ed4a81008b2b52717"
+# This is the exact RemotePairingKit revision used by current SideStore develop.
+# It exports both RPPairing and OpenSSL. The older e72cd027 revision does not
+# export the OpenSSL product expected by current minimuxer DeviceGateway.
+RPK_REV = "7b9d269ec64027d73a50faa917cb18fa218c1fc9"
 IDEVICE_RELEASE = "v0.1.66-ss-61c2704"
 
 
@@ -76,6 +79,8 @@ def main() -> None:
             IDEVICE_RELEASE,
             'name: "IDevice"',
             'name: "IdeviceGateway"',
+            '.product(name: "OpenSSL",   package: "RemotePairingKit")',
+            '.product(name: "RPPairing", package: "RemotePairingKit")',
         ],
         network: [MARKER, "? overrideIp"],
     }
