@@ -8,6 +8,7 @@ import re
 import sys
 
 LOCAL_PATH = 'path: "LocalBinary/IDevice.xcframework"'
+RPK_REV = "7b9d269ec64027d73a50faa917cb18fa218c1fc9"
 
 
 def die(message: str) -> "NoReturn":
@@ -31,8 +32,12 @@ def verify(root: Path) -> None:
         die("v13 package verification failed: active remote IDevice target remains")
     if 'path: "LocalBinary/EMProxy.xcframework"' not in package.read_text():
         die("v13 package verification failed: fixed local EMProxy target missing")
-    if "e72cd0272ab7b4548b5cd22ed4a81008b2b52717" not in gateway:
-        die("v13 package verification failed: RemotePairingKit revision is not pinned")
+    if RPK_REV not in gateway:
+        die("v13 package verification failed: current RemotePairingKit revision is not pinned")
+    if '.product(name: "OpenSSL",   package: "RemotePairingKit")' not in gateway:
+        die("v13 package verification failed: RemotePairingKit OpenSSL product is missing")
+    if '.product(name: "RPPairing", package: "RemotePairingKit")' not in gateway:
+        die("v13 package verification failed: RemotePairingKit RPPairing product is missing")
 
 
 def main() -> None:
