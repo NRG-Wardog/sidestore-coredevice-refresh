@@ -1,0 +1,72 @@
+name: Build SideStore v14 Protocol Matrix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidestore-v14-protocol-matrix
+  cancel-in-progress: false
+
+env:
+  SIDESTORE_REF: f3a18d61efae65b05dc935fff75b89225efdb0ff
+  MINIMUXER_REF: 71b957efc65e4687a94b1f1dac27fb3344c22936
+  IDEVICE_REF: 61c27041f8d3d0be4cc3e046ee04501649c9d66e
+  EMPROXY_REF: 6e117e140ca7cff4ff106bdefa18147552a0e592
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - name: Run Linux source, Rust, Swift and privacy barriers
+        env:
+          MODE: preflight
+        run: |
+          gzip -dc builder/scripts/v14_ci.sh.gz >/tmp/v14_ci.sh
+          bash /tmp/v14_ci.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v14-preflight
+          path: /tmp/v14-local-tests.txt
+          if-no-files-found: error
+
+  build:
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+      - uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+      - name: Build native libraries and SideStore v14 IPA
+        env:
+          MODE: build
+        run: |
+          gzip -dc builder/scripts/v14_ci.sh.gz >/tmp/v14_ci.sh
+          bash /tmp/v14_ci.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v14-protocol-matrix
+          path: |
+            ${{ runner.temp }}/sidestore-v14-build/SideStore/SideStore.ipa
+            /tmp/SideStore-v14-verification.txt
+          if-no-files-found: error
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v14-build-diagnostics
+          path: |
+            ${{ runner.temp }}/sidestore-v14-build/SideStore/build/logs
+            /tmp/v14-unzip-test.txt
+            /tmp/v14-embedded-strings.txt
+          if-no-files-found: ignore
