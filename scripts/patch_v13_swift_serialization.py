@@ -16,7 +16,8 @@ def die(message: str) -> "NoReturn":
 def verify(text: str) -> None:
     required = [
         MARKER,
-        'DispatchQueue(label: "com.SideStore.IdeviceGateway.v13.serial"',
+        "private static let v13FFIQueue = DispatchQueue(",
+        'label: "com.SideStore.IdeviceGateway.v13.serial"',
         "withFFIDispatch(on: Self.v13FFIQueue)",
         "native IDevice error diagnostics active",
         "idevice_init_logger(IdeviceLogLevel(rawValue: 1)",
