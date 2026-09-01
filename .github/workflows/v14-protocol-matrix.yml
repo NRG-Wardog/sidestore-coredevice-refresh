@@ -19,6 +19,7 @@ env:
   MINIMUXER_REF: ef8a54ccbd08a0b679a556df20121c1e7e13be7e
   IDEVICE_REF: 61c27041f8d3d0be4cc3e046ee04501649c9d66e
   EMPROXY_REF: 6e117e140ca7cff4ff106bdefa18147552a0e592
+  RPK_REF: 7b9d269ec64027d73a50faa917cb18fa218c1fc9
 
 jobs:
   preflight:
@@ -28,10 +29,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: builder
+      - name: Verify pinned RemotePairingKit product graph
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/mahee96/RemotePairingKit/${RPK_REF}/Package.swift" -o /tmp/RemotePairingKit.Package.swift
+          grep -Fq 'name: "RPPairing"' /tmp/RemotePairingKit.Package.swift
+          grep -Fq 'name: "OpenSSL"' /tmp/RemotePairingKit.Package.swift
+          grep -Fq 'OpenSSL.xcframework.zip' /tmp/RemotePairingKit.Package.swift
       - name: Run Linux source, Rust, Swift and privacy barriers
         env:
           MODE: preflight
-        run: bash builder/scripts/v14_ci.sh
+        run: |
+          python3 builder/scripts/patch_v14_spm_resolution.py builder/scripts/v14_ci.sh
+          bash builder/scripts/v14_ci.sh
       - uses: actions/upload-artifact@v4
         with:
           name: SideStore-v14-preflight
@@ -52,7 +61,9 @@ jobs:
       - name: Build native libraries and SideStore v14 IPA
         env:
           MODE: build
-        run: bash builder/scripts/v14_ci.sh
+        run: |
+          python3 builder/scripts/patch_v14_spm_resolution.py builder/scripts/v14_ci.sh
+          bash builder/scripts/v14_ci.sh
       - uses: actions/upload-artifact@v4
         with:
           name: SideStore-v14-protocol-matrix
