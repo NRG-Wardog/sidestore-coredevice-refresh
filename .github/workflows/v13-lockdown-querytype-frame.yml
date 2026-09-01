@@ -1,0 +1,414 @@
+name: Build SideStore v13 Lockdown QueryType Frame
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [v13-lockdown-querytype-frame]
+    paths:
+      - ".github/v13-build-trigger"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidestore-v13-lockdown-querytype-frame
+  cancel-in-progress: false
+
+env:
+  SIDESTORE_REF: f3a18d61efae65b05dc935fff75b89225efdb0ff
+  MINIMUXER_REF: 71b957efc65e4687a94b1f1dac27fb3344c22936
+  IDEVICE_REF: 61c27041f8d3d0be4cc3e046ee04501649c9d66e
+  EMPROXY_REF: 6e117e140ca7cff4ff106bdefa18147552a0e592
+
+jobs:
+  preflight:
+    name: Verify v13 framing, protocol order, serialization, and privacy
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout v13 builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Checkout exact minimuxer
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/minimuxer
+          ref: ${{ env.MINIMUXER_REF }}
+          path: minimuxer
+
+      - name: Checkout exact IDevice
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: ${{ env.IDEVICE_REF }}
+          submodules: recursive
+          path: idevice
+
+      - name: Checkout exact EMProxy
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/em_proxy
+          ref: ${{ env.EMPROXY_REF }}
+          path: em_proxy
+
+      - name: Checkout exact SideStore
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/SideStore
+          ref: ${{ env.SIDESTORE_REF }}
+          submodules: false
+          path: SideStore
+
+      - name: Verify source revisions
+        run: |
+          set -euo pipefail
+          test "$(git -C minimuxer rev-parse HEAD)" = "$MINIMUXER_REF"
+          test "$(git -C idevice rev-parse HEAD)" = "$IDEVICE_REF"
+          test "$(git -C em_proxy rev-parse HEAD)" = "$EMPROXY_REF"
+          test "$(git -C SideStore rev-parse HEAD)" = "$SIDESTORE_REF"
+
+      - name: Run complete v12 regression and v13 fail-closed suite
+        run: |
+          set -euo pipefail
+          python3 builder/tests/run_v13_local_tests.py \
+            builder minimuxer em_proxy idevice SideStore | tee /tmp/v13-local-tests.txt
+          grep -q 'v13 local suite PASS' /tmp/v13-local-tests.txt
+          grep -q 'v12 regression suite PASS' /tmp/v13-local-tests.txt
+
+      - name: Apply production patch sequence to exact sources
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/patch_v12_hybrid_backend.py minimuxer/Sources/MinimuxerApi.swift
+          python3 builder/scripts/patch_v12_hybrid_idevice.py minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          python3 builder/scripts/patch_v12_packages.py minimuxer
+          python3 builder/scripts/apply_emproxy_diag.py em_proxy/src/lib.rs
+
+          rm -rf SideStore/Dependencies/minimuxer
+          mkdir -p SideStore/Dependencies
+          cp -R minimuxer SideStore/Dependencies/minimuxer
+          python3 builder/scripts/apply_v12_boot_transport_fix.py SideStore/SideStore/AppBootManager.swift
+
+          python3 builder/scripts/patch_v13_idevice_protocol.py idevice
+          python3 builder/scripts/patch_v13_swift_serialization.py minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          python3 builder/scripts/patch_v13_emproxy_payload_diag.py em_proxy/src/lib.rs
+          python3 builder/scripts/patch_v13_packages.py minimuxer
+
+      - name: Parse patched Swift and package manifests
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse minimuxer/Sources/MinimuxerApi.swift
+          swiftc -frontend -parse minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          swiftc -frontend -parse minimuxer/Sources/Services/NetworkObserverService.swift
+          swiftc -frontend -parse SideStore/SideStore/AppBootManager.swift
+          swift package --package-path minimuxer dump-package >/tmp/minimuxer-package.json
+          swift package --package-path minimuxer/DeviceGateway dump-package >/tmp/gateway-package.json
+          grep -q 'IdeviceGateway' /tmp/gateway-package.json
+          grep -q 'LocalBinary/IDevice.xcframework' minimuxer/DeviceGateway/Package.swift
+
+      - name: Run targeted native framing unit test
+        working-directory: idevice
+        run: |
+          set -euo pipefail
+          cargo test --locked \
+            --manifest-path idevice/Cargo.toml \
+            --lib v13_frame_prefix_round_trip \
+            --no-default-features \
+            --features 'openssl,tcp'
+
+      - name: Compile-check patched IDevice FFI
+        working-directory: idevice
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path ffi/Cargo.toml --features obfuscate
+
+      - name: Compile-check fixed and bounded EMProxy
+        working-directory: em_proxy
+        run: |
+          set -euo pipefail
+          cargo check --locked --lib
+
+      - name: Hard architecture barriers
+        run: |
+          set -euo pipefail
+          NATIVE=idevice/ffi/src/tunnel_provider.rs
+          LIB=idevice/idevice/src/lib.rs
+          PROVIDER=idevice/idevice/src/provider.rs
+          GATEWAY=minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          API=minimuxer/Sources/MinimuxerApi.swift
+          EMP=em_proxy/src/lib.rs
+
+          grep -q 'LOCKDOWN_FRAME_WRITE' "$LIB"
+          test "$(grep -c 'socket.write_all(&framed).await?' "$LIB")" -eq 2
+          ! grep -Fq 'socket.write_all(&len.to_be_bytes()).await?' "$LIB"
+          grep -q 'stream.set_nodelay(true)?' "$PROVIDER"
+
+          query="$(grep -n 'LOCKDOWN_QUERY_TYPE_START' "$NATIVE" | head -1 | cut -d: -f1)"
+          session="$(grep -n 'LOCKDOWN_START_SESSION_START' "$NATIVE" | head -1 | cut -d: -f1)"
+          service="$(grep -n 'COREDEVICE_START_SERVICE_START' "$NATIVE" | head -1 | cut -d: -f1)"
+          test "$query" -lt "$session"
+          test "$session" -lt "$service"
+
+          grep -q 'HYBRID_FILE has_rp=' "$GATEWAY"
+          grep -q 'withFFIDispatch(on: Self.v13FFIQueue)' "$GATEWAY"
+          ! grep -Fq 'withFFIDispatch {' "$GATEWAY"
+          grep -q 'let resolvedBackend: GatewayBackend = .idevice' "$API"
+          grep -q 'EMP-V13-PAYLOAD' "$EMP"
+          grep -q 'V13_LOCKDOWN_EVENT_COUNTER' "$EMP"
+          grep -q 'path: "LocalBinary/IDevice.xcframework"' minimuxer/DeviceGateway/Package.swift
+          grep -q 'path: "LocalBinary/EMProxy.xcframework"' minimuxer/Package.swift
+
+          ! grep -E 'lockdownd_pair\(|PAIR_REQUEST_START|trust_prompt_expected=true|DYNAMIC_CANDIDATES|SS-V11-CLEAN-RP|SS-V10-LOCKDOWN-BOOTSTRAP|SS-V9-COREDEVICE|SS-ADAPT|EMP-NAT46|EMP-HAIRPIN' \
+            "$NATIVE" "$GATEWAY" "$API" "$EMP"
+          ! grep -E 'hex::encode|from_utf8_lossy\(b\)|payload_bytes|packet_body' "$EMP"
+
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v13-preflight
+          path: /tmp/v13-local-tests.txt
+          if-no-files-found: error
+
+  build:
+    name: Build patched native libraries and SideStore v13 IPA
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 80
+    steps:
+      - name: Checkout v13 builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Checkout exact SideStore with submodules
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/SideStore
+          ref: ${{ env.SIDESTORE_REF }}
+          submodules: recursive
+          fetch-depth: 0
+          path: SideStore
+
+      - name: Checkout exact IDevice
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: ${{ env.IDEVICE_REF }}
+          submodules: recursive
+          path: idevice
+
+      - name: Checkout exact EMProxy
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/em_proxy
+          ref: ${{ env.EMPROXY_REF }}
+          path: em_proxy
+
+      - name: Verify pinned sources
+        run: |
+          set -euo pipefail
+          test "$(git -C SideStore rev-parse HEAD)" = "$SIDESTORE_REF"
+          test "$(git -C SideStore/Dependencies/minimuxer rev-parse HEAD)" = "$MINIMUXER_REF"
+          test "$(git -C idevice rev-parse HEAD)" = "$IDEVICE_REF"
+          test "$(git -C em_proxy rev-parse HEAD)" = "$EMPROXY_REF"
+
+      - name: Setup Xcode 26.4
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          brew install ldid xcbeautify
+          if ! command -v bindgen >/dev/null 2>&1; then
+            cargo install --locked bindgen-cli --version 0.72.1
+          fi
+          rustup target add aarch64-apple-ios
+
+      - name: Cache Rust dependencies and outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/bindgen
+            idevice/target
+            em_proxy/target
+          key: sidestore-v13-macos26-arm64-${{ hashFiles('idevice/Cargo.lock', 'em_proxy/Cargo.lock', 'builder/scripts/patch_v13_idevice_protocol.py', 'builder/scripts/patch_v13_emproxy_payload_diag.py') }}
+          restore-keys: |
+            sidestore-v13-macos26-arm64-
+
+      - name: Patch and build IDevice arm64 iOS XCFramework
+        working-directory: idevice
+        run: |
+          set -euo pipefail
+          python3 ../builder/scripts/patch_v13_idevice_protocol.py .
+          grep -q 'LOCKDOWN_QUERY_TYPE_START' ffi/src/tunnel_provider.rs
+          grep -q 'LOCKDOWN_FRAME_WRITE' idevice/src/lib.rs
+
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
+            cargo build --release --locked --target aarch64-apple-ios \
+              --features obfuscate --manifest-path ffi/Cargo.toml
+
+          test -f target/aarch64-apple-ios/release/libidevice_ffi.a
+          test -f ffi/idevice.h
+          rm -rf swift/IDevice.xcframework
+          cp ffi/idevice.h swift/include/idevice.h
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libidevice_ffi.a \
+            -headers swift/include \
+            -output swift/IDevice.xcframework
+          test -d swift/IDevice.xcframework
+
+      - name: Patch and build EMProxy arm64 iOS XCFramework
+        working-directory: em_proxy
+        run: |
+          set -euo pipefail
+          python3 ../builder/scripts/apply_emproxy_diag.py src/lib.rs
+          python3 ../builder/scripts/patch_v13_emproxy_payload_diag.py src/lib.rs
+          grep -q 'EMP-NONBLOCK' src/lib.rs
+          grep -q 'EMP-V13-PAYLOAD' src/lib.rs
+
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            cargo build --release --locked --target aarch64-apple-ios
+
+          test -f target/aarch64-apple-ios/release/libem_proxy.a
+          rm -rf libs/EMProxy.xcframework
+          mkdir -p libs
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libem_proxy.a \
+            -headers include \
+            -output libs/EMProxy.xcframework
+          test -d libs/EMProxy.xcframework
+
+      - name: Inject native binaries and apply v12 plus v13 gateway patches
+        run: |
+          set -euo pipefail
+          MUX="SideStore/Dependencies/minimuxer"
+          DEVICE_LOCAL="$MUX/DeviceGateway/LocalBinary"
+          MUX_LOCAL="$MUX/LocalBinary"
+          rm -rf "$DEVICE_LOCAL/IDevice.xcframework" "$MUX_LOCAL/EMProxy.xcframework"
+          mkdir -p "$DEVICE_LOCAL" "$MUX_LOCAL"
+          cp -R idevice/swift/IDevice.xcframework "$DEVICE_LOCAL/IDevice.xcframework"
+          cp -R em_proxy/libs/EMProxy.xcframework "$MUX_LOCAL/EMProxy.xcframework"
+
+          python3 builder/scripts/patch_v12_hybrid_backend.py "$MUX/Sources/MinimuxerApi.swift"
+          python3 builder/scripts/patch_v12_hybrid_idevice.py "$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
+          python3 builder/scripts/patch_v12_packages.py "$MUX"
+          python3 builder/scripts/apply_v12_boot_transport_fix.py SideStore/SideStore/AppBootManager.swift
+
+          python3 builder/scripts/patch_v13_swift_serialization.py "$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
+          python3 builder/scripts/patch_v13_packages.py "$MUX"
+          python3 builder/scripts/apply_background_auth_gate.py \
+            SideStore/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift
+
+      - name: Verify compiled architecture before SwiftPM
+        run: |
+          set -euo pipefail
+          MUX="SideStore/Dependencies/minimuxer"
+          GATEWAY="$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
+          API="$MUX/Sources/MinimuxerApi.swift"
+
+          swiftc -frontend -parse "$GATEWAY"
+          swiftc -frontend -parse "$API"
+          swiftc -frontend -parse "$MUX/Sources/Services/NetworkObserverService.swift"
+          swiftc -frontend -parse SideStore/SideStore/AppBootManager.swift
+
+          grep -q 'HYBRID_FILE has_rp=' "$GATEWAY"
+          grep -q 'withFFIDispatch(on: Self.v13FFIQueue)' "$GATEWAY"
+          grep -q 'native IDevice error diagnostics active' "$GATEWAY"
+          grep -q 'let resolvedBackend: GatewayBackend = .idevice' "$API"
+          grep -q 'path: "LocalBinary/IDevice.xcframework"' "$MUX/DeviceGateway/Package.swift"
+          grep -q 'path: "LocalBinary/EMProxy.xcframework"' "$MUX/Package.swift"
+          test -d "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
+          test -d "$MUX/LocalBinary/EMProxy.xcframework"
+          ! grep -E 'lockdownd_pair\(|PAIR_REQUEST_START|DYNAMIC_CANDIDATES|SS-V11-CLEAN-RP|SS-V10-LOCKDOWN-BOOTSTRAP|SS-V9-COREDEVICE|SS-ADAPT' "$GATEWAY" "$API"
+
+      - name: Resolve Swift packages with clean retry
+        working-directory: SideStore
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
+            if xcodebuild -resolvePackageDependencies -project AltStore.xcodeproj -scheme SideStore; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+
+      - name: Build SideStore v13
+        working-directory: SideStore
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/workflow.py build
+
+      - name: Verify IPA and embedded runtime markers
+        run: |
+          set -euo pipefail
+          IPA="SideStore/SideStore.ipa"
+          test -f "$IPA"
+          unzip -t "$IPA" >/tmp/v13-unzip-test.txt
+          rm -rf /tmp/v13-ipa
+          mkdir -p /tmp/v13-ipa
+          unzip -q "$IPA" -d /tmp/v13-ipa
+          APP="/tmp/v13-ipa/Payload/SideStore.app"
+          test -d "$APP"
+
+          find "$APP" -type f -size +32k -print0 | xargs -0 strings > /tmp/v13-embedded-strings.txt
+          for marker in \
+            '[SS-V12-HYBRID] HYBRID_FILE' \
+            '[SS-V13-HYBRID] native IDevice error diagnostics active' \
+            '[SS-V13-IDEVICE] LOCKDOWN_FRAME_WRITE' \
+            '[SS-V13-IDEVICE] LOCKDOWN_QUERY_TYPE_START' \
+            '[SS-V13-IDEVICE] LOCKDOWN_START_SESSION_SUCCESS' \
+            '[SS-V13-IDEVICE] COREDEVICE_RSD_HANDSHAKE_SUCCESS' \
+            '[EMP-V13-PAYLOAD]' \
+            '[EMP-NONBLOCK] UDP socket nonblocking mode enabled'; do
+            grep -Fq "$marker" /tmp/v13-embedded-strings.txt
+          done
+
+          ! grep -E 'PAIR_REQUEST_START|trust_prompt_expected=true|SS-V11-CLEAN-RP|SS-V10-LOCKDOWN-BOOTSTRAP|SS-V9-COREDEVICE|SS-ADAPT|EMP-NAT46|EMP-HAIRPIN' /tmp/v13-embedded-strings.txt
+          find "$APP" -iname '*IdeviceGateway*' -o -iname '*IDevice*' | tee /tmp/v13-frameworks.txt
+          grep -q 'IdeviceGateway' /tmp/v13-frameworks.txt
+
+          SHA="$(shasum -a 256 "$IPA" | awk '{print $1}')"
+          SIZE="$(stat -f '%z' "$IPA")"
+          {
+            echo "SideStore v13 Lockdown QueryType Frame"
+            echo "builder_commit=$GITHUB_SHA"
+            echo "sidestore_ref=$SIDESTORE_REF"
+            echo "minimuxer_ref=$MINIMUXER_REF"
+            echo "idevice_ref=$IDEVICE_REF"
+            echo "emproxy_ref=$EMPROXY_REF"
+            echo "ipa_size=$SIZE"
+            echo "ipa_sha256=$SHA"
+            echo "framing=combined-prefix-plus-payload"
+            echo "lockdown_order=querytype-before-startsession"
+            echo "ffi_dispatch=serialized"
+            echo "verification=PASS"
+          } | tee /tmp/SideStore-v13-verification.txt
+
+      - name: Upload SideStore v13 IPA and verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v13-lockdown-querytype-frame
+          path: |
+            SideStore/SideStore.ipa
+            /tmp/SideStore-v13-verification.txt
+          if-no-files-found: error
+
+      - name: Upload v13 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v13-build-diagnostics
+          path: |
+            SideStore/build/logs
+            /tmp/v13-unzip-test.txt
+            /tmp/v13-frameworks.txt
+          if-no-files-found: ignore
