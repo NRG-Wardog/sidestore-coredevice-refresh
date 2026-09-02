@@ -16,7 +16,7 @@ def verify(path: Path):
     req=[MARK,"fn v23_route_source","RP_CONTROL_CONNECT_START","RP_CONTROL_CONNECT_PASS","RP_PAIRING_START","RP_PAIRING_PASS","RP_CREATE_LISTENER_START","RP_CREATE_LISTENER_PASS","RP_DYNAMIC_ROUTE","RP_DYNAMIC_CONNECT_START","RP_DYNAMIC_CONNECT_PASS","RP_DYNAMIC_CONNECT_FAIL","RP_TLS_PSK_START","RP_TLS_PSK_PASS","RP_TUNNEL_INFO","RP_RSD_CONNECT_START","RP_RSD_CONNECT_PASS","RP_RSD_HANDSHAKE_START","RP_RSD_HANDSHAKE_PASS","RP_TOTAL_PASS"]
     miss=[x for x in req if x not in s]
     if miss: die(f"v23 RP diagnostics missing: {miss}")
-    for snippet in ["let tunnel_port = rpc.create_tcp_listener().await","let mut tunnel_addr = connect_addr;","tunnel_addr.set_port(tunnel_port);","tokio::net::TcpStream::connect(tunnel_addr)","connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key())"]:
+    for snippet in ["rpc.create_tcp_listener().await","let mut tunnel_addr = connect_addr;","tunnel_addr.set_port(tunnel_port);","tokio::net::TcpStream::connect(tunnel_addr)","connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key())"]:
         if snippet not in s: die(f"canonical RPPairing contract changed: {snippet}")
     marker_lines='\n'.join(x for x in s.splitlines() if MARK in x)
     for secret in ["private_key=","public_key=","identifier=","HostPrivateKey","RootPrivateKey","DeviceCertificate","HostCertificate","UDID="]:
