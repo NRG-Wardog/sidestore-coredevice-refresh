@@ -1,0 +1,108 @@
+name: SideStore v21 Final Lockdown Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type BUILD_V21 only after local validation is complete
+        required: true
+        type: string
+  push:
+    branches: [v21-lockdown-first]
+    paths:
+      - ".github/v21-build-trigger"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidestore-v21-final-lockdown
+  cancel-in-progress: false
+
+env:
+  SIDESTORE_REF: 3dc127ee6f17aa20f0863becd07c0c6043d8dddd
+  MINIMUXER_REF: ef8a54ccbd08a0b679a556df20121c1e7e13be7e
+
+jobs:
+  preflight:
+    if: ${{ github.event_name == 'push' || github.event.inputs.confirmation == 'BUILD_V21' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Verify Lockdown graph without native builds
+        env:
+          MODE: preflight
+        run: bash builder/scripts/v21_ci.sh
+
+      - name: Upload compact preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v21-lockdown-preflight
+          path: |
+            /tmp/v21-preflight.txt
+            /tmp/v21-minimuxer-package.json
+            /tmp/v21-gateway-package.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+  build:
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
+      - name: Restore pinned Swift package downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.cache/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData/*/SourcePackages/artifacts
+            ~/Library/Developer/Xcode/DerivedData/*/SourcePackages/checkouts
+          key: sidestore-v21-spm-${{ runner.os }}-${{ env.SIDESTORE_REF }}-${{ env.MINIMUXER_REF }}-${{ hashFiles('builder/scripts/patch_v21_*.py', 'builder/scripts/verify_v21_lockdown.py') }}
+          restore-keys: |
+            sidestore-v21-spm-${{ runner.os }}-${{ env.SIDESTORE_REF }}-${{ env.MINIMUXER_REF }}-
+            sidestore-v21-spm-${{ runner.os }}-
+
+      - name: Build once with released native XCFrameworks
+        env:
+          MODE: build
+        run: bash builder/scripts/v21_ci.sh
+
+      - name: Upload verified SideStore v21 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v21-lockdown-first
+          path: |
+            ${{ runner.temp }}/sidestore-v21-build/SideStore/SideStore.ipa
+            /tmp/v21-verification.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload diagnostics only on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v21-build-failure-diagnostics
+          path: |
+            ${{ runner.temp }}/sidestore-v21-build/SideStore/build/logs
+            /tmp/v21-unzip-test.txt
+            /tmp/v21-embedded-strings.txt
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 2
