@@ -23,15 +23,15 @@ env:
 
 jobs:
   preflight:
-    name: fast-preflight
+    name: changed-component-preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
           path: builder
 
-      - name: Validate v19 generators and packet model
+      - name: Validate generators and deterministic NAT44 model
         run: |
           python3 -m py_compile \
             builder/scripts/patch_v15_ci_inject.py \
@@ -41,47 +41,46 @@ jobs:
             builder/scripts/apply_emproxy_nat44_dynamic.py \
             builder/tests/test_nat44_packet_model.py
           python3 builder/tests/test_nat44_packet_model.py
-          grep -Fq '[EMP-NAT44] dynamic listener bridge active' builder/scripts/apply_emproxy_nat44_dynamic.py
-          grep -Fq 'new mapping requires initiating SYN' builder/scripts/apply_emproxy_nat44_dynamic.py
-          grep -Fq 'NAT44_CONTROL_PORT' builder/scripts/apply_emproxy_nat44_dynamic.py
-          grep -Fq 'NAT44_LOCKDOWN_PORT' builder/scripts/apply_emproxy_nat44_dynamic.py
 
-      - name: Verify pinned RemotePairingKit product graph
-        run: |
-          curl -fsSL "https://raw.githubusercontent.com/mahee96/RemotePairingKit/${RPK_REF}/Package.swift" -o /tmp/RemotePairingKit.Package.swift
-          grep -Fq 'name: "RPPairing"' /tmp/RemotePairingKit.Package.swift
-          grep -Fq 'name: "OpenSSL"' /tmp/RemotePairingKit.Package.swift
-
-      - name: Generate final CI runner
-        run: |
           python3 builder/scripts/patch_v15_ci_inject.py builder/scripts/v14_ci.sh /tmp/v17_ci.sh
           python3 builder/scripts/patch_v18_ci_inject.py /tmp/v17_ci.sh /tmp/v18_ci.sh
           python3 builder/scripts/patch_v19_ci_inject.py /tmp/v18_ci.sh /tmp/v19_ci.sh
           bash -n /tmp/v19_ci.sh
 
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ runner.temp }}/sidestore-v19-fast-preflight-target
-          key: sidestore-v19-linux-${{ hashFiles('builder/scripts/*.py', 'builder/scripts/v14_ci.sh', 'builder/tests/test_nat44_packet_model.py') }}
-          restore-keys: |
-            sidestore-v19-linux-
+          ! grep -Fq 'cargo install --locked bindgen-cli' /tmp/v19_ci.sh
+          grep -Fq '[EMP-NAT44] dynamic listener bridge active' builder/scripts/apply_emproxy_nat44_dynamic.py
+          grep -Fq 'new mapping requires initiating SYN' builder/scripts/apply_emproxy_nat44_dynamic.py
+          grep -Fq 'NAT44_CONTROL_PORT' builder/scripts/apply_emproxy_nat44_dynamic.py
+          grep -Fq 'NAT44_LOCKDOWN_PORT' builder/scripts/apply_emproxy_nat44_dynamic.py
 
-      - name: Apply every patch and compile changed EMProxy crate
-        env:
-          MODE: preflight
-          FAST_PREFLIGHT: "1"
+      - name: Apply patch chain and compile only changed EMProxy crate
         run: |
-          python3 builder/scripts/patch_v14_spm_resolution.py /tmp/v19_ci.sh
-          bash /tmp/v19_ci.sh
+          ROOT="${RUNNER_TEMP}/sidestore-v19-emproxy-preflight"
+          rm -rf "$ROOT"
+          git init -q "$ROOT"
+          git -C "$ROOT" remote add origin https://github.com/SideStore/em_proxy.git
+          git -C "$ROOT" fetch -q --depth=1 origin "$EMPROXY_REF"
+          git -C "$ROOT" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$ROOT" rev-parse HEAD)" = "$EMPROXY_REF"
+
+          python3 builder/scripts/apply_emproxy_diag.py "$ROOT/src/lib.rs"
+          python3 builder/scripts/patch_v13_emproxy_payload_diag.py "$ROOT/src/lib.rs"
+          python3 builder/scripts/apply_emproxy_nat44_dynamic.py "$ROOT/src/lib.rs"
+          python3 builder/scripts/apply_emproxy_nat44_dynamic.py "$ROOT/src/lib.rs"
+
+          grep -Fq '[EMP-NAT44] dynamic listener bridge active' "$ROOT/src/lib.rs"
+          grep -Fq 'nat44_translate_forward' "$ROOT/src/lib.rs"
+          grep -Fq 'nat44_translate_reverse' "$ROOT/src/lib.rs"
+          ! grep -Eq 'HostPrivateKey|RootPrivateKey|private_key=|certificate=|EscrowBag|encryption_key=' "$ROOT/src/lib.rs"
+
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/sidestore-v19-emproxy-target" \
+            cargo check --locked --manifest-path "$ROOT/Cargo.toml" --lib
 
   build:
-    name: final-macos-build
+    name: one-final-macos-build
     needs: preflight
     runs-on: macos-26
-    timeout-minutes: 50
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,22 +90,13 @@ jobs:
         with:
           xcode-version: "26.4"
 
-      - uses: actions/cache/restore@v4
-        id: cargo-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: sidestore-v19-${{ runner.os }}-${{ runner.arch }}-xcode26.4-${{ hashFiles('builder/scripts/*.py', 'builder/scripts/v14_ci.sh') }}
-          restore-keys: |
-            sidestore-v19-${{ runner.os }}-${{ runner.arch }}-xcode26.4-
-
       - name: Generate final CI runner
         run: |
           python3 builder/scripts/patch_v15_ci_inject.py builder/scripts/v14_ci.sh /tmp/v17_ci.sh
           python3 builder/scripts/patch_v18_ci_inject.py /tmp/v17_ci.sh /tmp/v18_ci.sh
           python3 builder/scripts/patch_v19_ci_inject.py /tmp/v18_ci.sh /tmp/v19_ci.sh
           bash -n /tmp/v19_ci.sh
+          ! grep -Fq 'cargo install --locked bindgen-cli' /tmp/v19_ci.sh
 
       - name: Build native libraries and SideStore v19 IPA
         env:
@@ -114,14 +104,6 @@ jobs:
         run: |
           python3 builder/scripts/patch_v14_spm_resolution.py /tmp/v19_ci.sh
           bash /tmp/v19_ci.sh
-
-      - uses: actions/cache/save@v4
-        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
       - uses: actions/upload-artifact@v4
         if: success()
