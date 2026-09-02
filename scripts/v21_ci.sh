@@ -76,6 +76,38 @@ validate_checkout() {
   test "$(git -C "$MUX" rev-parse HEAD)" = "$MINIMUXER_REF"
 }
 
+resolve_packages_deterministically() {
+  local openssl_artifact="$HOME/Library/Caches/org.swift.swiftpm/artifacts/https___github_com_krzyzanowskim_OpenSSL_releases_download_3_6_2000_OpenSSL_xcframework_zip"
+  local resolved=0
+  local attempt
+
+  for attempt in 1 2 3; do
+    # GitHub macOS runner / SwiftPM can leave this binary artifact directory
+    # behind while another package-resolution path attempts the same download.
+    # Remove only the conflicting OpenSSL artifact, never the whole SwiftPM cache.
+    rm -rf "$openssl_artifact"
+    rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*/SourcePackages/artifacts/openssl 2>/dev/null || true
+
+    if (
+      cd "$SIDESTORE_DIR"
+      xcodebuild \
+        -resolvePackageDependencies \
+        -disablePackageRepositoryCache \
+        -project AltStore.xcodeproj \
+        -scheme SideStore
+    ); then
+      resolved=1
+      break
+    fi
+
+    test "$attempt" -lt 3
+    sleep 2
+  done
+
+  test "$resolved" -eq 1
+  echo "v21 deterministic SwiftPM resolution PASS"
+}
+
 prepare() {
   validate_checkout
   python3 -m py_compile "$BUILDER/scripts/patch_v21_adaptive_coredevice.py"
@@ -119,6 +151,8 @@ build_once() {
   if ! command -v ldid >/dev/null 2>&1; then
     HOMEBREW_NO_AUTO_UPDATE=1 brew install ldid
   fi
+
+  resolve_packages_deterministically
 
   mkdir -p "$SIDESTORE_DIR/build/logs"
   (
