@@ -7,11 +7,6 @@ on:
         description: Type BUILD_V21 to authorize the single final macOS build
         required: true
         type: string
-  push:
-    branches:
-      - v21-lockdown-first
-    paths:
-      - .github/v21-adaptive-build-now
 
 permissions:
   contents: read
@@ -26,7 +21,7 @@ env:
 
 jobs:
   build:
-    if: ${{ github.event_name == 'push' || inputs.confirmation == 'BUILD_V21' }}
+    if: ${{ inputs.confirmation == 'BUILD_V21' }}
     runs-on: macos-26
     timeout-minutes: 30
 
