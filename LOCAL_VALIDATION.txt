@@ -1,0 +1,9 @@
+V22 local pre-Actions validation: PASS
+test_v22_source_patch.py: PASS
+test_v22_native_patch.py: PASS
+test_v22_package_patch.py: PASS
+test_v22_workflow_policy.py: PASS
+bash -n scripts/v22_ci.sh: PASS
+python py_compile: PASS
+workflow YAML parse: PASS
+No macOS build executed during these local checks.
