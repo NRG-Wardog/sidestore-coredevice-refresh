@@ -1,0 +1,288 @@
+name: Build SideStore v22 RP-First Final
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type BUILD_V22 to authorize final build
+        required: true
+        type: string
+  push:
+    branches: [v22-rpfirst-self-refresh]
+    paths:
+      - ".github/v22-build-trigger"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidestore-v22-rpfirst-final
+  cancel-in-progress: false
+
+env:
+  SIDESTORE_REF: 3dc127ee6f17aa20f0863becd07c0c6043d8dddd
+  MINIMUXER_REF: ef8a54ccbd08a0b679a556df20121c1e7e13be7e
+  IDEVICE_REF: 61c27041f8d3d0be4cc3e046ee04501649c9d66e
+
+jobs:
+  preflight:
+    if: ${{ github.event_name == 'push' || inputs.confirmation == 'BUILD_V22' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          repository: SideStore/minimuxer
+          ref: ${{ env.MINIMUXER_REF }}
+          path: minimuxer
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: ${{ env.IDEVICE_REF }}
+          path: idevice
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Verify exact pins and patch syntax
+        run: |
+          set -euo pipefail
+          test "$(git -C minimuxer rev-parse HEAD)" = "$MINIMUXER_REF"
+          test "$(git -C idevice rev-parse HEAD)" = "$IDEVICE_REF"
+          python3 -m py_compile \
+            builder/scripts/patch_v21_adaptive_coredevice.py \
+            builder/scripts/patch_v22_rpfirst_delta.py \
+            builder/scripts/patch_v22_local_idevice_package.py \
+            builder/scripts/patch_v13_idevice_protocol.py
+
+      - name: Verify stock RP same-peer contract before native patch
+        run: |
+          set -euo pipefail
+          T=idevice/ffi/src/tunnel_provider.rs
+          grep -Fq 'let tunnel_port = rpc.create_tcp_listener().await?;' "$T"
+          grep -Fq 'let mut tunnel_addr = connect_addr;' "$T"
+          grep -Fq 'tunnel_addr.set_port(tunnel_port);' "$T"
+          grep -Fq 'finish_tunnel(&mut rpc, socket_addr).await' "$T"
+          ! grep -Ei 'ipsec|en0|NAT44|EMP-TRANSIT' "$T"
+
+      - name: Apply and compile-check V13 Lockdown fallback
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/patch_v13_idevice_protocol.py idevice
+          python3 builder/scripts/patch_v13_idevice_protocol.py idevice
+          T=idevice/ffi/src/tunnel_provider.rs
+          L=idevice/idevice/src/lib.rs
+          P=idevice/idevice/src/provider.rs
+          grep -Fq '[SS-V13-IDEVICE] LOCKDOWN_QUERY_TYPE_START' "$T"
+          grep -Fq '[SS-V13-IDEVICE] LOCKDOWN_START_SESSION_START' "$T"
+          grep -Fq '[SS-V13-IDEVICE] COREDEVICE_START_SERVICE_START' "$T"
+          test "$(grep -c 'socket.write_all(&framed).await?' "$L")" -eq 2
+          grep -Fq 'stream.set_nodelay(true)?' "$P"
+          cargo test --locked --manifest-path idevice/idevice/Cargo.toml --lib v13_frame_prefix_round_trip --no-default-features --features 'openssl,tcp'
+          cargo check --locked --manifest-path idevice/ffi/Cargo.toml --features obfuscate
+
+      - name: Apply V21 base and V22 RP-first delta to exact minimuxer
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/patch_v21_adaptive_coredevice.py minimuxer
+          python3 builder/scripts/patch_v22_rpfirst_delta.py minimuxer
+          python3 builder/scripts/patch_v22_rpfirst_delta.py minimuxer
+          python3 builder/scripts/patch_v22_local_idevice_package.py minimuxer
+          python3 builder/scripts/patch_v22_local_idevice_package.py minimuxer
+          swiftc -frontend -parse minimuxer/DeviceGateway/PairingProtocol.swift
+          swiftc -frontend -parse minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          swiftc -frontend -parse minimuxer/Sources/Services/NetworkObserverService.swift
+
+          G=minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
+          Q=minimuxer/DeviceGateway/Package.swift
+          grep -Fq '[SS-V22-RPFIRST] composite route=stock-rppairing-first coredevice-fallback' "$G"
+          grep -Fq '[SS-V22-RPFIRST] native connect timeout=15s' "$G"
+          grep -Fq 'tunnel_create_rppairing(' "$G"
+          grep -Fq 'tunnel_create_usb(provider, &adapter, &handshake)' "$G"
+          grep -Fq 'RSD Lockdown returned no live UniqueDeviceID' "$G"
+          grep -Fq 'path: "LocalBinary/IDevice.xcframework"' "$Q"
+          ! grep -Fq 'composite route=coredevice-first rp-fallback' "$G"
+          ! grep -R -Eq 'EMP-NAT44|EMP-TRANSIT|v14-rp-protocol-matrix|ipsec-first' minimuxer/Sources minimuxer/DeviceGateway
+          printf '%s\n' 'V22 preflight PASS' 'primary=stock RemotePairing same-peer' 'fallback=V13 QueryType-first CoreDevice' | tee /tmp/v22-preflight.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v22-preflight
+          path: /tmp/v22-preflight.txt
+          retention-days: 3
+
+  build:
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          repository: SideStore/SideStore
+          ref: ${{ env.SIDESTORE_REF }}
+          path: work/SideStore
+          fetch-depth: 1
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: ${{ env.IDEVICE_REF }}
+          path: idevice
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Verify pinned build sources
+        run: |
+          set -euo pipefail
+          test "$(git -C work/SideStore rev-parse HEAD)" = "$SIDESTORE_REF"
+          test "$(git -C work/SideStore/Dependencies/minimuxer rev-parse HEAD)" = "$MINIMUXER_REF"
+          test "$(git -C idevice rev-parse HEAD)" = "$IDEVICE_REF"
+
+      - uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
+      - name: Restore build caches only
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/bindgen
+            idevice/target
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.cache/org.swift.swiftpm
+          key: sidestore-v22-final-${{ runner.os }}-${{ env.IDEVICE_REF }}-${{ env.MINIMUXER_REF }}
+          restore-keys: |
+            sidestore-v13-macos26-arm64-
+            sidestore-v21-adaptive-spm-
+            sidestore-
+
+      - name: Ensure minimal build tools
+        run: |
+          set -euo pipefail
+          if ! command -v ldid >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install ldid; fi
+          if ! command -v bindgen >/dev/null 2>&1; then cargo install --locked bindgen-cli --version 0.72.1; fi
+          rustup target add aarch64-apple-ios
+
+      - name: Build one custom IDevice arm64 XCFramework
+        working-directory: idevice
+        run: |
+          set -euo pipefail
+          python3 ../builder/scripts/patch_v13_idevice_protocol.py .
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
+            cargo build --release --locked --target aarch64-apple-ios \
+              --features obfuscate --manifest-path ffi/Cargo.toml
+          test -f target/aarch64-apple-ios/release/libidevice_ffi.a
+          test -f ffi/idevice.h
+          rm -rf swift/IDevice.xcframework
+          cp ffi/idevice.h swift/include/idevice.h
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libidevice_ffi.a \
+            -headers swift/include \
+            -output swift/IDevice.xcframework
+          test -d swift/IDevice.xcframework
+
+      - name: Inject V22 route and custom IDevice
+        run: |
+          set -euo pipefail
+          MUX=work/SideStore/Dependencies/minimuxer
+          mkdir -p "$MUX/DeviceGateway/LocalBinary"
+          rm -rf "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
+          cp -R idevice/swift/IDevice.xcframework "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
+          python3 builder/scripts/patch_v21_adaptive_coredevice.py "$MUX"
+          python3 builder/scripts/patch_v22_rpfirst_delta.py "$MUX"
+          python3 builder/scripts/patch_v22_local_idevice_package.py "$MUX"
+          swiftc -frontend -parse "$MUX/DeviceGateway/PairingProtocol.swift"
+          swiftc -frontend -parse "$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
+          swiftc -frontend -parse "$MUX/Sources/Services/NetworkObserverService.swift"
+
+      - name: Resolve SwiftPM deterministically
+        working-directory: work/SideStore
+        run: |
+          set -euo pipefail
+          artifact="$HOME/Library/Caches/org.swift.swiftpm/artifacts/https___github_com_krzyzanowskim_OpenSSL_releases_download_3_6_2000_OpenSSL_xcframework_zip"
+          ok=0
+          for attempt in 1 2 3; do
+            rm -rf "$artifact"
+            rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*/SourcePackages/artifacts/openssl 2>/dev/null || true
+            if xcodebuild -resolvePackageDependencies -disablePackageRepositoryCache -project AltStore.xcodeproj -scheme SideStore; then ok=1; break; fi
+            test "$attempt" -lt 3
+            sleep 2
+          done
+          test "$ok" -eq 1
+
+      - name: Build SideStore application exactly once
+        working-directory: work/SideStore
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs
+          NSUnbufferedIO=YES make -B build 2>&1 | tee build/logs/build.log
+          make fakesign 2>&1 | tee -a build/logs/build.log
+          make ipa 2>&1 | tee -a build/logs/build.log
+
+      - name: Verify final IPA and embedded architecture
+        run: |
+          set -euo pipefail
+          IPA=work/SideStore/SideStore.ipa
+          test -f "$IPA"
+          unzip -t "$IPA" >/tmp/v22-unzip-test.txt
+          rm -rf /tmp/v22-ipa && mkdir -p /tmp/v22-ipa
+          unzip -q "$IPA" -d /tmp/v22-ipa
+          find /tmp/v22-ipa/Payload/SideStore.app -type f -size +32k -print0 | xargs -0 strings >/tmp/v22-strings.txt
+          grep -Fq '[SS-V22-RPFIRST] composite route=stock-rppairing-first coredevice-fallback' /tmp/v22-strings.txt
+          grep -Fq '[SS-V22-RPFIRST] RP_PRIMARY_START' /tmp/v22-strings.txt
+          grep -Fq '[SS-V13-IDEVICE] LOCKDOWN_QUERY_TYPE_START' /tmp/v22-strings.txt
+          grep -Fq '[SS-V13-IDEVICE] LOCKDOWN_FRAME_WRITE' /tmp/v22-strings.txt
+          grep -Fq 'tunnel_create_rppairing' /tmp/v22-strings.txt
+          grep -Fq 'tunnel_create_usb' /tmp/v22-strings.txt
+          ! grep -Eq 'EMP-NAT44|EMP-TRANSIT|v14-rp-protocol-matrix' /tmp/v22-strings.txt
+          SHA="$(shasum -a 256 "$IPA" | awk '{print $1}')"
+          SIZE="$(stat -f '%z' "$IPA")"
+          {
+            echo 'SideStore v22 RP-first final'
+            echo "builder_commit=$GITHUB_SHA"
+            echo "sidestore_ref=$SIDESTORE_REF"
+            echo "minimuxer_ref=$MINIMUXER_REF"
+            echo "idevice_ref=$IDEVICE_REF"
+            echo "ipa_size=$SIZE"
+            echo "ipa_sha256=$SHA"
+            echo 'primary=stock-rppairing-same-peer'
+            echo 'fallback=v13-querytype-coredevice'
+            echo 'verification=PASS'
+          } | tee /tmp/v22-verification.txt
+
+      - name: Upload verified V22 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v22-rpfirst-final
+          path: |
+            work/SideStore/SideStore.ipa
+            /tmp/v22-verification.txt
+            /tmp/v22-unzip-test.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload failure diagnostics only on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v22-failure-diagnostics
+          path: |
+            work/SideStore/build/logs
+            /tmp/v22-verification.txt
+            /tmp/v22-unzip-test.txt
+            /tmp/v22-strings.txt
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 3
