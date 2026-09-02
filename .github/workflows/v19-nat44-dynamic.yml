@@ -113,6 +113,7 @@ jobs:
             ${{ runner.temp }}/sidestore-v14-build/SideStore/SideStore.ipa
             /tmp/SideStore-v14-verification.txt
           if-no-files-found: error
+          compression-level: 0
           retention-days: 7
 
       - name: Upload failure diagnostics only
