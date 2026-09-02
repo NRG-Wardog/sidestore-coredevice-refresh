@@ -131,6 +131,52 @@ r'''    func syncFetchUDID\(\) throws -> String\? \{
 
     func syncGetLockdownValue''',"strict UDID")
 
+    if f"{M} GetValue start key=" not in s:
+        s=rep(s,
+'''        return try withLockdown { (_, client) -> String? in
+            var valNode: plist_t? = nil
+            let err = lockdownd_get_value(client, nil, key, &valNode)
+            guard err == LOCKDOWN_E_SUCCESS, let valNode = valNode else {
+                return nil
+            }
+            defer { plist_free(valNode) }
+
+            var valPtr: UnsafeMutablePointer<CChar>? = nil
+            plist_get_string_val(valNode, &valPtr)
+            if let valPtr = valPtr {
+                let val = String(cString: valPtr)
+                free(valPtr)
+                return val
+            }
+            return nil
+        }
+''',
+'''        debugLog("[SS-V21-LOCKDOWN] GetValue start key=\\(key)")
+        return try withLockdown { (_, client) -> String? in
+            var valNode: plist_t? = nil
+            let err = lockdownd_get_value(client, nil, key, &valNode)
+            guard err == LOCKDOWN_E_SUCCESS, let valNode = valNode else {
+                debugLog("[SS-V21-LOCKDOWN] GetValue failed key=\\(key) code=\\(err.rawValue)")
+                throw LibimobiledeviceGatewayError(
+                    .connectionFailed,
+                    reason: "lockdownd_get_value failed with code \\(err.rawValue)"
+                )
+            }
+            defer { plist_free(valNode) }
+
+            var valPtr: UnsafeMutablePointer<CChar>? = nil
+            plist_get_string_val(valNode, &valPtr)
+            guard let valPtr else {
+                debugLog("[SS-V21-LOCKDOWN] GetValue failed key=\\(key) non-string")
+                return nil
+            }
+            let value = String(cString: valPtr)
+            free(valPtr)
+            debugLog("[SS-V21-LOCKDOWN] GetValue pass key=\\(key)")
+            return value
+        }
+''',"GetValue diagnostics")
+
     p.write_text(s)
     print("v21 libimobiledevice gateway patch: PASS")
 
