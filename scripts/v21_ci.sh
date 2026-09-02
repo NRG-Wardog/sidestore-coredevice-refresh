@@ -61,6 +61,8 @@ PY
 
   grep -Fq '[SS-V21-LOCKDOWN] pairing selected=' "$gateway"
   grep -Fq '[SS-V21-LOCKDOWN] lockdownd handshake start' "$gateway"
+  grep -Fq '[SS-V21-LOCKDOWN] GetValue start key=' "$gateway"
+  grep -Fq '[SS-V21-LOCKDOWN] GetValue pass key=' "$gateway"
   grep -Fq '[SS-V21-LOCKDOWN] UniqueDeviceID query pass' "$gateway"
   ! grep -Fq 'return cachedUDID' "$gateway"
 
@@ -172,7 +174,12 @@ done
 
 (
   cd SideStore
-  python3 scripts/ci/workflow.py build
+  mkdir -p build/logs
+  set -o pipefail
+  NSUnbufferedIO=YES make build \
+    2>&1 | tee -a build/logs/build.log | xcbeautify --renderer github-actions
+  make fakesign | tee -a build/logs/build.log
+  make ipa | tee -a build/logs/build.log
 )
 
 IPA="$ROOT/SideStore/SideStore.ipa"
@@ -193,6 +200,8 @@ for marker in \
   '[SS-V21-LOCKDOWN] pairing selected=' \
   '[SS-V21-LOCKDOWN] fake usbmuxd listening' \
   '[SS-V21-LOCKDOWN] lockdownd handshake start' \
+  '[SS-V21-LOCKDOWN] GetValue start key=' \
+  '[SS-V21-LOCKDOWN] GetValue pass key=' \
   '[SS-V21-LOCKDOWN] UniqueDeviceID query pass'; do
   grep -Fq "$marker" /tmp/v21-embedded-strings.txt
 done
@@ -212,5 +221,6 @@ SIZE="$(stat -f '%z' "$IPA")"
   echo 'backend=libimobiledevice'
   echo 'pairing_policy=lockdown-first'
   echo 'native_rust_builds=0'
+  echo 'dsym_archive=skipped'
   echo 'verification=PASS'
 } | tee /tmp/v21-verification.txt
