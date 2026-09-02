@@ -9,23 +9,37 @@ def die(msg: str) -> None:
 
 def patch_tunnel(path: Path) -> None:
     s = path.read_text()
-    old = '    let body: &[u8] = br#"{"type":"clientHandshakeRequest","mtu":16000}"#;\n'
+    old = '    let body: &[u8] = br#\"{\"type\":\"clientHandshakeRequest\",\"mtu\":16000}\"#;\n'
     new = '''    // pymobiledevice3 uses Python json.dumps() here. Match that wire image
     // byte-for-byte, including spaces, because CoreDevice's CDTunnel parser has
     // repeatedly proven read/wire-shape sensitive on-device.
     let body: &[u8] = br#"{"type": "clientHandshakeRequest", "mtu": 16000}"#;
     tracing::error!("[SS-V18-CDT] REQUEST_WIRE_PARITY=pymobiledevice3-json-dumps body_len={} frame_len={}", body.len(), CDTUNNEL_MAGIC.len() + 2 + body.len());
 '''
-    if old not in s:
-        die('v18 CDTunnel compact body anchor missing')
-    s = s.replace(old, new, 1)
-    s = s.replace('[SS-V17-CDT] REQUEST_WRITE_PASS', '[SS-V18-CDT] REQUEST_WRITE_PASS')
-    s = s.replace('[SS-V17-CDT] RESPONSE_TLS_READ_FAIL', '[SS-V18-CDT] RESPONSE_TLS_READ_FAIL')
-    s = s.replace('[SS-V17-CDT] RESPONSE_TLS_RECORD', '[SS-V18-CDT] RESPONSE_TLS_RECORD')
-    s = s.replace('[SS-V17-CDT] RESPONSE_HEADER_PASS', '[SS-V18-CDT] RESPONSE_HEADER_PASS')
-    s = s.replace('[SS-V17-CDT] HANDSHAKE_PASS', '[SS-V18-CDT] HANDSHAKE_PASS')
+    if 'REQUEST_WIRE_PARITY=pymobiledevice3-json-dumps' not in s:
+        if old not in s:
+            die('v18 CDTunnel compact body anchor missing')
+        s = s.replace(old, new, 1)
+
+    marker_replacements = (
+        ('[SS-V17-CDT] REQUEST_WRITE_PASS', '[SS-V18-CDT] REQUEST_WRITE_PASS'),
+        ('[SS-V17-CDT] RESPONSE_TLS_READ_FAIL', '[SS-V18-CDT] RESPONSE_TLS_READ_FAIL'),
+        ('[SS-V17-CDT] RESPONSE_TLS_RECORD', '[SS-V18-CDT] RESPONSE_TLS_RECORD'),
+        ('[SS-V17-CDT] RESPONSE_HEADER_PASS', '[SS-V18-CDT] RESPONSE_HEADER_PASS'),
+        ('[SS-V17-CDT] HANDSHAKE_PASS', '[SS-V18-CDT] HANDSHAKE_PASS'),
+    )
+    for old_marker, new_marker in marker_replacements:
+        s = s.replace(old_marker, new_marker)
+
     path.write_text(s)
-    for marker in ('REQUEST_WIRE_PARITY=pymobiledevice3-json-dumps', 'body_len={}', '[SS-V18-CDT] REQUEST_WRITE_PASS'):
+    required = (
+        'REQUEST_WIRE_PARITY=pymobiledevice3-json-dumps',
+        'body_len={}',
+        '[SS-V18-CDT] REQUEST_WRITE_PASS',
+        '[SS-V18-CDT] RESPONSE_HEADER_PASS',
+        '[SS-V18-CDT] HANDSHAKE_PASS',
+    )
+    for marker in required:
         if marker not in s:
             die(f'missing tunnel marker {marker}')
 
@@ -33,14 +47,20 @@ def patch_tunnel(path: Path) -> None:
 def patch_tls(path: Path) -> None:
     s = path.read_text()
     if 'const CT_ALERT: u8 = 0x15;' not in s:
-        s = s.replace('const CT_CHANGE_CIPHER_SPEC: u8 = 0x14;\n', 'const CT_CHANGE_CIPHER_SPEC: u8 = 0x14;\nconst CT_ALERT: u8 = 0x15;\n', 1)
+        anchor = 'const CT_CHANGE_CIPHER_SPEC: u8 = 0x14;\n'
+        if anchor not in s:
+            die('v18 TLS content-type anchor missing')
+        s = s.replace(anchor, anchor + 'const CT_ALERT: u8 = 0x15;\n', 1)
 
-    # Harden CBC padding parsing. The upstream subtraction can underflow on a malformed/alert record.
-    old = '''    let pad_value = *decrypted.last().unwrap() as usize;
+    # Harden CBC padding parsing. This block is intentionally idempotent because
+    # the build pipeline reapplies all source patches after native binary
+    # injection.
+    if 'CBC_PADDING_BOUNDS_FAIL' not in s:
+        old = '''    let pad_value = *decrypted.last().unwrap() as usize;
     let content_len = decrypted.len() - (pad_value + 1);
     let mac_len = keys.suite.mac_key_len();
 '''
-    new = '''    let pad_value = *decrypted.last().unwrap() as usize;
+        new = '''    let pad_value = *decrypted.last().unwrap() as usize;
     let padding_len = pad_value + 1;
     if padding_len > decrypted.len() {
         tracing::error!("[SS-V18-TLS] CBC_PADDING_BOUNDS_FAIL seq={} ct={} decrypted_len={} pad_value={}", seq, ct, decrypted.len(), pad_value);
@@ -53,11 +73,12 @@ def patch_tls(path: Path) -> None:
     let content_len = decrypted.len() - padding_len;
     let mac_len = keys.suite.mac_key_len();
 '''
-    if old not in s:
-        die('v18 TLS padding anchor missing')
-    s = s.replace(old, new, 1)
+        if old not in s:
+            die('v18 TLS padding anchor missing')
+        s = s.replace(old, new, 1)
 
-    old = '''    pub async fn read_app_data(&mut self) -> Result<Vec<u8>, IdeviceError> {
+    if '[SS-V18-TLS] RX_RECORD' not in s:
+        old = '''    pub async fn read_app_data(&mut self) -> Result<Vec<u8>, IdeviceError> {
         let (ct, payload) = read_record(&mut self.inner).await?;
         if ct != CT_APPLICATION_DATA {
             return Err(IdeviceError::InternalError(format!(
@@ -75,7 +96,7 @@ def patch_tls(path: Path) -> None:
         Ok(plaintext)
     }
 '''
-    new = '''    pub async fn read_app_data(&mut self) -> Result<Vec<u8>, IdeviceError> {
+        new = '''    pub async fn read_app_data(&mut self) -> Result<Vec<u8>, IdeviceError> {
         loop {
             let seq = self.read_seq;
             let (ct, payload) = match read_record(&mut self.inner).await {
@@ -129,11 +150,17 @@ def patch_tls(path: Path) -> None:
         }
     }
 '''
-    if old not in s:
-        die('v18 read_app_data anchor missing')
-    s = s.replace(old, new, 1)
+        if old not in s:
+            die('v18 read_app_data anchor missing')
+        s = s.replace(old, new, 1)
+
     path.write_text(s)
-    for marker in ('[SS-V18-TLS] RX_RECORD', '[SS-V18-TLS] ALERT', '[SS-V18-TLS] APP_DECRYPT_PASS', 'CBC_PADDING_BOUNDS_FAIL'):
+    for marker in (
+        '[SS-V18-TLS] RX_RECORD',
+        '[SS-V18-TLS] ALERT',
+        '[SS-V18-TLS] APP_DECRYPT_PASS',
+        'CBC_PADDING_BOUNDS_FAIL',
+    ):
         if marker not in s:
             die(f'missing TLS marker {marker}')
 
@@ -181,7 +208,7 @@ def main() -> None:
     patch_tunnel(paths[0])
     patch_tls(paths[1])
     patch_rsd(paths[2])
-    print('v18 full CDTunnel/TLS/RSD patch applied')
+    print('v18 full CDTunnel/TLS/RSD patch applied and verified (idempotent)')
 
 
 if __name__ == '__main__':
