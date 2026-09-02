@@ -32,10 +32,12 @@ jobs:
       - name: Verify v17 patch syntax and invariants
         run: |
           python3 -m py_compile builder/scripts/patch_v15_tls_cdtunnel.py
+          python3 -m py_compile builder/scripts/patch_v17_rsd_core.py
           python3 -m py_compile builder/scripts/apply_emproxy_rebind_recovery.py
           grep -Fq '[SS-V17-CDT] HANDSHAKE_START' builder/scripts/patch_v15_tls_cdtunnel.py
           grep -Fq 'tls_stream.write_app_data(&packet).await' builder/scripts/patch_v15_tls_cdtunnel.py
-          grep -Fq '[SS-V17-RSD] HANDSHAKE_PASS' builder/scripts/patch_v15_tls_cdtunnel.py
+          grep -Fq '[SS-V17-RSD] HANDSHAKE_PASS' builder/scripts/patch_v17_rsd_core.py
+          grep -Fq '[SS-V17-RSD] XPC_HANDSHAKE_PASS' builder/scripts/patch_v17_rsd_core.py
           grep -Fq '[EMP-RECOVER] UDP socket rebound after ENOTCONN' builder/scripts/apply_emproxy_rebind_recovery.py
       - name: Verify pinned RemotePairingKit product graph
         run: |
@@ -83,6 +85,8 @@ jobs:
           grep -Fq '[SS-V17-CDT] HANDSHAKE_START' /tmp/v14-embedded-strings.txt
           grep -Fq '[SS-V17-CDT] HANDSHAKE_PASS' /tmp/v14-embedded-strings.txt
           grep -Fq '[SS-V17-RSD] CONNECT_START' /tmp/v14-embedded-strings.txt
+          grep -Fq '[SS-V17-RSD] CORE_HANDSHAKE_START' /tmp/v14-embedded-strings.txt
+          grep -Fq '[SS-V17-RSD] XPC_HANDSHAKE_PASS' /tmp/v14-embedded-strings.txt
           grep -Fq '[SS-V17-RSD] HANDSHAKE_PASS' /tmp/v14-embedded-strings.txt
           grep -Fq 'FLAG: READY_TO_AUTOMATION' /tmp/v14-embedded-strings.txt
       - uses: actions/upload-artifact@v4
