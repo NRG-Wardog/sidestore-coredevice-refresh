@@ -30,6 +30,7 @@ def main():
                 "if missingLockdownKeys.isEmpty","if missingRPKeys.isEmpty"],
         "gw":[f"{M} pairing selected=",f"{M} device lookup pass",
               f"{M} lockdownd handshake pass",f"{M} UniqueDeviceID query pass",
+              f"{M} GetValue start key=",f"{M} GetValue pass key=",
               "classicRecord.removeValue"],
         "net":[f"{M} retaining explicit LocalVPN peer","? overrideIp"],
         "impl":[f"{M} network monitor started",f"{M} usbmuxd socket retargeted",
