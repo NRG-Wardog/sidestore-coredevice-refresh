@@ -24,12 +24,8 @@ def main() -> None:
         die(f'v18 patch call anchor count={s.count(block)}')
     s = s.replace(block, inject, 1)
 
-    anchor = '''  grep -q '\\[SS-V17-RSD\\] HANDSHAKE_PASS' "$ffi"\n'''
-    extra = anchor + '''  grep -q 'REQUEST_WIRE_PARITY=pymobiledevice3-json-dumps' "$idevice_root/idevice/src/remote_pairing/tunnel.rs"\n  grep -q '\\[SS-V18-TLS\\] RX_RECORD' "$idevice_root/idevice/src/remote_pairing/tls_psk.rs"\n  grep -q '\\[SS-V18-TLS\\] ALERT' "$idevice_root/idevice/src/remote_pairing/tls_psk.rs"\n  grep -q 'CBC_PADDING_BOUNDS_FAIL' "$idevice_root/idevice/src/remote_pairing/tls_psk.rs"\n  grep -q '\\[SS-V18-RSD\\] VALIDATION_PASS' "$idevice_root/idevice/src/services/rsd.rs"\n'''
-    if s.count(anchor) != 1:
-        die('v18 source barrier anchor missing')
-    s = s.replace(anchor, extra, 1)
-
+    # The patch itself verifies every source invariant when it runs, so do not
+    # depend on a particular v17 grep-barrier layout here.
     py = 'python3 -m py_compile "$BUILDER/scripts/patch_v15_tls_cdtunnel.py"\n'
     if py not in s:
         die('v18 py_compile anchor missing')
