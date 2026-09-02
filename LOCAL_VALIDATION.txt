@@ -1,9 +1,11 @@
 V22 local pre-Actions validation: PASS
-test_v22_source_patch.py: PASS
-test_v22_native_patch.py: PASS
-test_v22_package_patch.py: PASS
-test_v22_workflow_policy.py: PASS
-bash -n scripts/v22_ci.sh: PASS
-python py_compile: PASS
-workflow YAML parse: PASS
-No macOS build executed during these local checks.
+Original full V22 source/native/package/workflow regression suite: PASS
+Reduced-risk final architecture review: PASS
+V21 adaptive base -> V22 RP-first delta fixture: PASS
+V22 delta second-run idempotency: PASS
+Patched Swift frontend parse: PASS
+V22 final workflow YAML parse: PASS
+V22 final workflow policy: exactly one macOS job and one SideStore make -B build: PASS
+Primary RP path keeps stock IDevice same-peer dynamic listener behavior: VERIFIED from pinned source
+Fallback uses V13 QueryType + combined Lockdown frame + TCP_NODELAY: VERIFIED by existing patch and final preflight
+No final macOS build had been started when this file was written.
