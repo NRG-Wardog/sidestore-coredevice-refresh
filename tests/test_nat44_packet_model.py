@@ -1,17 +1,51 @@
 #!/usr/bin/env python3
-"""Deterministic model tests for the EMProxy dynamic-listener NAT44 tuple."""
+'''Deterministic tests for IKEv2-first EMProxy NAT44 selection and tuples.'''
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import ipaddress
 import struct
 
 VIRTUAL = ipaddress.IPv4Address("10.7.0.1").packed
 CLIENT = ipaddress.IPv4Address("10.7.0.10").packed
-PHYSICAL = ipaddress.IPv4Address("10.0.0.15").packed
+IKEV2 = ipaddress.IPv4Address("10.31.2.206").packed
+EN0 = ipaddress.IPv4Address("10.0.0.15").packed
 CONTROL = 49152
 LOCKDOWN = 62078
 DYNAMIC_MIN = 49153
+
+
+@dataclass(frozen=True)
+class Interface:
+    name: str
+    ipv4: bytes
+    index: int
+    up: bool = True
+
+
+def usable_ipv4(ip: bytes) -> bool:
+    first, second, third, _ = ip
+    return (
+        ip != b"\0\0\0\0"
+        and first != 127
+        and not (first == 169 and second == 254)
+        and not (first == 10 and second == 7 and third == 0)
+        and first < 224
+    )
+
+
+def select_transit(interfaces: list[Interface]) -> Interface | None:
+    candidates = [item for item in interfaces if item.up and usable_ipv4(item.ipv4)]
+    ipsec = [item for item in candidates if item.name.startswith("ipsec")]
+    en0 = [item for item in candidates if item.name == "en0"]
+    fallback_en = [
+        item for item in candidates if item.name.startswith("en") and item.name != "en0"
+    ]
+    for group in (ipsec, en0, fallback_en):
+        if group:
+            return max(group, key=lambda item: item.index)
+    return None
 
 
 def checksum(data: bytes) -> int:
@@ -81,10 +115,10 @@ def eligible_forward(p: bytes, has_flow: bool = False) -> bool:
     return has_flow or bool(flags & 0x02 and not flags & 0x10)
 
 
-def translate_forward(p: bytearray) -> bytearray:
+def translate_forward(p: bytearray, transit: bytes) -> bytearray:
     out = bytearray(p)
     out[12:16] = VIRTUAL
-    out[16:20] = PHYSICAL
+    out[16:20] = transit
     repair(out)
     return out
 
@@ -97,17 +131,62 @@ def translate_reverse(p: bytearray) -> bytearray:
     return out
 
 
-def main() -> None:
+def test_selector() -> None:
+    selected = select_transit(
+        [
+            Interface("en0", EN0, 11),
+            Interface("ipsec7", IKEV2, 29),
+            Interface("utun4", CLIENT, 31),
+        ]
+    )
+    assert selected is not None
+    assert selected.name == "ipsec7"
+    assert selected.ipv4 == IKEV2
+
+    selected = select_transit(
+        [
+            Interface("ipsec2", ipaddress.IPv4Address("10.31.1.10").packed, 20),
+            Interface("ipsec9", ipaddress.IPv4Address("10.31.9.10").packed, 37),
+            Interface("en0", EN0, 11),
+        ]
+    )
+    assert selected is not None and selected.name == "ipsec9"
+
+    selected = select_transit(
+        [
+            Interface("ipsec7", IKEV2, 29, up=False),
+            Interface("en0", EN0, 11),
+        ]
+    )
+    assert selected is not None and selected.name == "en0"
+
+    selected = select_transit(
+        [Interface("en2", ipaddress.IPv4Address("192.168.1.8").packed, 14)]
+    )
+    assert selected is not None and selected.name == "en2"
+
+    selected = select_transit(
+        [
+            Interface("ipsec7", CLIENT, 29),
+            Interface("en0", ipaddress.IPv4Address("169.254.4.3").packed, 11),
+            Interface("lo0", ipaddress.IPv4Address("127.0.0.1").packed, 1),
+        ]
+    )
+    assert selected is None
+
+
+def test_packet_translation() -> None:
     client_port, service_port = 53551, 53008
     syn = packet(CLIENT, VIRTUAL, client_port, service_port, 0x02)
     assert eligible_forward(syn)
-    forwarded = translate_forward(syn)
+
+    forwarded = translate_forward(syn, IKEV2)
     assert forwarded[12:16] == VIRTUAL
-    assert forwarded[16:20] == PHYSICAL
+    assert forwarded[16:20] == IKEV2
     assert struct.unpack("!HH", forwarded[20:24]) == (client_port, service_port)
     assert valid(forwarded)
 
-    syn_ack = packet(PHYSICAL, VIRTUAL, service_port, client_port, 0x12)
+    syn_ack = packet(IKEV2, VIRTUAL, service_port, client_port, 0x12)
     reversed_packet = translate_reverse(syn_ack)
     assert reversed_packet[12:16] == VIRTUAL
     assert reversed_packet[16:20] == CLIENT
@@ -117,10 +196,16 @@ def main() -> None:
     assert not eligible_forward(packet(CLIENT, VIRTUAL, client_port, CONTROL, 0x02))
     assert not eligible_forward(packet(CLIENT, VIRTUAL, client_port, LOCKDOWN, 0x02))
     assert not eligible_forward(packet(CLIENT, VIRTUAL, client_port, service_port, 0x10))
-    assert eligible_forward(packet(CLIENT, VIRTUAL, client_port, service_port, 0x10), has_flow=True)
+    assert eligible_forward(
+        packet(CLIENT, VIRTUAL, client_port, service_port, 0x10), has_flow=True
+    )
     assert not eligible_forward(packet(VIRTUAL, CLIENT, CONTROL, client_port, 0x12))
 
-    print("NAT44 packet model: 10/10 assertions passed")
+
+def main() -> None:
+    test_selector()
+    test_packet_translation()
+    print("IKEv2-first NAT44 model: selector and packet invariants passed")
 
 
 if __name__ == "__main__":
