@@ -102,6 +102,30 @@ def main() -> None:
         "v19 fast preflight cargo gate",
     )
 
+    # bindgen-cli is not used by the pinned IDevice build. ffi/build.rs invokes
+    # the cbindgen Rust library directly, so installing the standalone bindgen
+    # executable only burns macOS minutes. Keep only tools actually consumed.
+    tooling_block = '''brew install ldid xcbeautify || true
+if ! command -v bindgen >/dev/null 2>&1; then
+  cargo install --locked bindgen-cli --version 0.72.1
+fi
+rustup target add aarch64-apple-ios
+'''
+    tooling_block_v19 = '''if ! command -v ldid >/dev/null 2>&1; then
+  brew install ldid
+fi
+if ! command -v xcbeautify >/dev/null 2>&1; then
+  brew install xcbeautify
+fi
+rustup target add aarch64-apple-ios
+'''
+    source = replace_once(
+        source,
+        tooling_block,
+        tooling_block_v19,
+        "v19 remove unused bindgen-cli install",
+    )
+
     source = source.replace(
         "SideStore v18 full CDTunnel/RSD/signing preflight",
         "SideStore v19 NAT44 dynamic-listener preflight",
