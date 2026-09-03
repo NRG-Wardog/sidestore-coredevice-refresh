@@ -3,3 +3,8 @@
 *.a
 escapeos_*
 test_idevice/
+temp_isideload/
+test_extract/
+v25_artifact/
+__pycache__/
+*.pyc
