@@ -26,7 +26,12 @@ def patch_remote_pairing_mod(root: Path) -> None:
     if anchor not in text:
         die("Could not find create_tcp_listener anchor in remote_pairing/mod.rs")
 
-    quic_method = '''    /// Send a request to create a QUIC tunnel listener on the device.
+    quic_method = '''    /// Consumes the client and returns the underlying socket provider.
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+
+    /// Send a request to create a QUIC tunnel listener on the device.
     /// Returns the dynamic UDP port the device is listening on.
     pub async fn create_quic_listener(&mut self, client_pub_b64: &str) -> Result<u16, IdeviceError> {
         let request = plist!({
@@ -64,7 +69,7 @@ def patch_remote_pairing_mod(root: Path) -> None:
 '''
     text = once(text, anchor, quic_method + anchor, "create_quic_listener method")
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched idevice/src/remote_pairing/mod.rs with create_quic_listener")
+    print("Successfully patched idevice/src/remote_pairing/mod.rs with into_inner and create_quic_listener")
 
 def patch_tunnel_provider(root: Path) -> None:
     path = root / "ffi" / "src" / "tunnel_provider.rs"
@@ -77,10 +82,10 @@ def patch_tunnel_provider(root: Path) -> None:
 
     ffi_function = '''
 /// Creates a dynamic QUIC listener on the remote device via RemotePairing control channel.
-/// Returns the dynamic UDP port for native QUIC connection.
+/// Returns the dynamic UDP port for native QUIC connection, and retains the control connection fd.
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null.
+/// All pointer arguments must be valid and non-null (except `out_control_fd`).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rppairing_create_quic_listener(
     addr: *const idevice_sockaddr,
@@ -89,6 +94,7 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
     pairing_file: *mut RpPairingFileHandle,
     client_pub_b64: *const c_char,
     out_port: *mut u16,
+    out_control_fd: *mut i32,
 ) -> *mut IdeviceFfiError {
     if addr.is_null()
         || hostname.is_null()
@@ -122,12 +128,30 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
         let mut rpc = RemotePairingClient::new(conn, &host);
         rpc.connect(rpf, async || String::new()).await?;
 
-        rpc.create_quic_listener(&client_pub).await
+        let port = rpc.create_quic_listener(&client_pub).await?;
+        let tcp = rpc.into_inner().inner;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::IntoRawFd;
+            let std_stream = tcp.into_std().map_err(|e| IdeviceError::InternalError(format!("into_std: {e}")))?;
+            let fd = std_stream.into_raw_fd();
+            Ok::<_, IdeviceError>((port, fd))
+        }
+        #[cfg(not(unix))]
+        {
+            Ok::<_, IdeviceError>((port, -1))
+        }
     });
 
     match res {
-        Ok(port) => {
-            unsafe { *out_port = port; }
+        Ok((port, fd)) => {
+            unsafe {
+                *out_port = port;
+                if !out_control_fd.is_null() {
+                    *out_control_fd = fd;
+                }
+            }
             null_mut()
         }
         Err(e) => ffi_err!(e),
@@ -151,14 +175,15 @@ def patch_idevice_h(root: Path) -> None:
     sig = '''
 /**
  * Creates a dynamic QUIC listener on the remote device via RemotePairing control channel.
- * Returns the dynamic UDP port for native QUIC connection.
+ * Returns the dynamic UDP port for native QUIC connection, and retains the control connection fd.
  */
 struct IdeviceFfiError *rppairing_create_quic_listener(const idevice_sockaddr *addr,
                                                        idevice_socklen_t addr_len,
                                                        const char *hostname,
                                                        struct RpPairingFileHandle *pairing_file,
                                                        const char *client_pub_b64,
-                                                       uint16_t *out_port);
+                                                       uint16_t *out_port,
+                                                       int32_t *out_control_fd);
 '''
     text += sig
     path.write_text(text, encoding="utf-8")
