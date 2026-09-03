@@ -84,10 +84,10 @@ def patch_ffi_cargo_toml(root: Path) -> None:
     if anchor not in text:
         die("Could not find [dependencies] in ffi/Cargo.toml")
 
-    dep = 'quinn = { version = "0.11.11", default-features = false, features = ["rustls-aws-lc-rs", "runtime-tokio"] }\n'
+    dep = 'quinn = { version = "0.11.11", default-features = false, features = ["rustls-aws-lc-rs", "runtime-tokio"] }\ntinyvec = "=1.8.1"\n'
     text = once(text, anchor, anchor + dep, "add quinn dependency")
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched ffi/Cargo.toml with quinn dependency")
+    print("Successfully patched ffi/Cargo.toml with quinn and tinyvec dependencies")
 
 def patch_tunnel_provider(root: Path) -> None:
     path = root / "ffi" / "src" / "tunnel_provider.rs"
