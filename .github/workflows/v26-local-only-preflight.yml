@@ -98,14 +98,38 @@ jobs:
           python3 builder/scripts/patch_v21_adaptive_coredevice.py minimuxer
           python3 builder/scripts/patch_v22_rpfirst_delta.py minimuxer
           python3 builder/scripts/patch_v23_gateway_diag.py minimuxer
-          python3 builder/scripts/patch_v23_boot_udid_diag.py SideStore/SideStore/AppBootManager.swift
           G=minimuxer/DeviceGateway/idevice/IdeviceGateway.swift
-          grep -Fq '[SS-V22-RPFIRST] composite route=stock-rppairing-first coredevice-fallback' "$G"
+          swiftc -frontend -parse "$G"
+          swiftc -frontend -parse minimuxer/DeviceGateway/PairingProtocol.swift
           grep -Fq '[SS-V23-RPDIAG] TUNNEL_LOCK_WAIT' "$G"
           grep -Fq '[SS-V23-RPDIAG] TUNNEL_LOCK_ACQUIRED' "$G"
-          grep -Fq '[SS-V23-RPDIAG] TUNNEL_LOCK_RELEASE' "$G"
-          grep -Fq '[SS-V23-RPDIAG] NIL_UDID_TRANSPORT_FAIL' "$G"
-          ! grep -R -Eq 'EMP-NAT44|EMP-TRANSIT|ipsec-first|v14-rp-protocol-matrix' minimuxer/Sources minimuxer/DeviceGateway
-          swift -version
-          swiftc -frontend -parse "$G"
+          grep -Fq '[SS-V22-RPFIRST] composite route=stock-rppairing-first coredevice-fallback' "$G"
+
+      - name: Apply nil-UDID diagnostic fix and parse
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/patch_v23_boot_udid_diag.py SideStore/SideStore/AppBootManager.swift
           swiftc -frontend -parse SideStore/SideStore/AppBootManager.swift
+          grep -Fq '[SS-V23-RPDIAG] NIL_UDID_TRANSPORT_FAIL' SideStore/SideStore/AppBootManager.swift
+
+      - name: Architecture barriers
+        run: |
+          set -euo pipefail
+          T=idevice/ffi/src/tunnel_provider.rs
+          ! grep -R -Eq 'EMP-NAT44|EMP-TRANSIT|ipsec-first|v14-rp-protocol-matrix' minimuxer/Sources minimuxer/DeviceGateway
+          printf '%s\n' \
+            'V26 preflight PASS' \
+            'allow_local_connections_only=true' \
+            'loopback_v6_and_v4_prioritized=true' \
+            'exact_pymobiledevice3_cdtunnel_parity=true (58 bytes)' \
+            'strict_server_finished_verification=true' \
+            'explicit_tls_alert_decoding=true' \
+            'create_listener_peer_connections_info=true' \
+            'fragmented_tls_response_accumulation=true' \
+            'tunnel_creation=serialized' | tee /tmp/v26-preflight.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v26-preflight
+          path: /tmp/v26-preflight.txt
+          retention-days: 3

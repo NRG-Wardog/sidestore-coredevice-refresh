@@ -163,7 +163,7 @@ jobs:
           grep -Fq '[SS-V23-RPDIAG] TUNNEL_LOCK_WAIT' "$G"
           grep -Fq '[SS-V23-RPDIAG] TUNNEL_LOCK_ACQUIRED' "$G"
           grep -Fq '[SS-V23-RPDIAG] TUNNEL_LOCK_RELEASE' "$G"
-          grep -Fq '[SS-V23-RPDIAG] NIL_UDID_TRANSPORT_FAIL' "$G"
+          grep -Fq '[SS-V23-RPDIAG] NIL_UDID_TRANSPORT_FAIL' work/SideStore/SideStore/AppBootManager.swift
           ! grep -R -Eq 'EMP-NAT44|EMP-TRANSIT|ipsec-first|v14-rp-protocol-matrix' "$MUX/Sources" "$MUX/DeviceGateway"
 
       - name: Resolve SwiftPM deterministically
