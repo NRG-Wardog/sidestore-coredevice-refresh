@@ -1,0 +1,69 @@
+name: Build LocalDevVPN True Hairpin
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [v28-true-utun-hairpin, main]
+    paths:
+      - ".github/v28-build-trigger"
+      - "scripts/PacketTunnelProvider_Hairpin.swift"
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout diag repository
+        uses: actions/checkout@v4
+
+      - name: Clone LocalDevVPN
+        run: |
+          git clone https://github.com/jkcoxson/LocalDevVPN.git /tmp/LocalDevVPN
+
+      - name: Replace PacketTunnelProvider.swift
+        run: |
+          cp scripts/PacketTunnelProvider_Hairpin.swift /tmp/LocalDevVPN/TunnelProv/PacketTunnelProvider.swift
+          echo "=== Patched PacketTunnelProvider.swift ==="
+          head -n 30 /tmp/LocalDevVPN/TunnelProv/PacketTunnelProvider.swift
+
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Build Xcode Archive
+        run: |
+          cd /tmp/LocalDevVPN
+          xcodebuild archive \
+            -project LocalDevVPN.xcodeproj \
+            -scheme LocalDevVPN \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/LocalDevVPN.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Create Payload and Sign
+        run: |
+          cd /tmp/LocalDevVPN
+          mkdir -p Payload
+          cp -R build/LocalDevVPN.xcarchive/Products/Applications/LocalDevVPN.app Payload/LocalDevVPN.app
+          
+          # Sign App Extension
+          APPEX_PATH=$(find Payload/LocalDevVPN.app/PlugIns -name "*.appex" | head -n 1)
+          echo "Found App Extension at: $APPEX_PATH"
+          ldid -STunnelProv/TunnelProv.entitlements "$APPEX_PATH/$(basename "$APPEX_PATH" .appex)"
+          
+          # Sign Main App
+          ldid -SLocalDevVPN/LocalDevVPN.entitlements "Payload/LocalDevVPN.app/LocalDevVPN"
+          
+          # Create IPA
+          zip -r /tmp/LocalDevVPN-hairpin.ipa Payload
+          cp /tmp/LocalDevVPN-hairpin.ipa "$GITHUB_WORKSPACE/LocalDevVPN-hairpin.ipa"
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalDevVPN-hairpin
+          path: LocalDevVPN-hairpin.ipa
