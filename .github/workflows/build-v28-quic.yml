@@ -41,6 +41,7 @@ jobs:
       - name: Build idevice FFI for aarch64-apple-ios
         run: |
           cd idevice
+          cargo update -p tinyvec --precise 1.8.1 || true
           BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
             IPHONEOS_DEPLOYMENT_TARGET=15.0 \
             cargo build --release --target aarch64-apple-ios \
