@@ -26,31 +26,7 @@ def patch_remote_pairing_mod(root: Path) -> None:
     if anchor not in text:
         die("Could not find create_tcp_listener anchor in remote_pairing/mod.rs")
 
-    quic_method = '''    /// Autonomous connect using the known paired peer identity
-    pub async fn connect_any(&mut self) -> Result<(), IdeviceError> {
-        self.attempt_pair_verify().await?;
-
-        let priv_bytes: [u8; 32] = [
-            0x1c, 0x75, 0x61, 0xfc, 0xa9, 0x98, 0x36, 0x05,
-            0xa1, 0xe5, 0x5d, 0x2c, 0x35, 0x9c, 0xe8, 0x2b,
-            0x4c, 0x78, 0x5b, 0xa6, 0x55, 0xc4, 0x3a, 0x2e,
-            0xde, 0xae, 0x8d, 0x32, 0x56, 0x6c, 0x07, 0x18,
-        ];
-        let ed25519_private_key = ed25519_dalek::SigningKey::from_bytes(&priv_bytes);
-        let ed25519_public_key = ed25519_dalek::VerifyingKey::from(&ed25519_private_key);
-        let mut rpf = RpPairingFile {
-            e_private_key: ed25519_private_key,
-            e_public_key: ed25519_public_key,
-            identifier: "ffae921e-5905-3998-b911-851e6f0c3cf4".to_string(),
-            alt_irk: None,
-            generated_by: None,
-        };
-
-        self.validate_pairing(&mut rpf).await?;
-        Ok(())
-    }
-
-    /// Send a request to create a QUIC tunnel listener on the device.
+    quic_method = '''    /// Send a request to create a QUIC tunnel listener on the device.
     /// Returns the dynamic UDP port the device is listening on.
     pub async fn create_quic_listener(&mut self, client_pub_b64: &str) -> Result<u16, IdeviceError> {
         let request = plist!({
@@ -71,7 +47,7 @@ def patch_remote_pairing_mod(root: Path) -> None:
         });
 
         let response = self.send_receive_encrypted_request(request).await?;
-        tracing::error!("[RP-QUIC] createListener(quic) response: {response:#?}");
+        tracing::debug!("[RP-QUIC] createListener(quic) response: {response:#?}");
 
         let listener = find_in_plist(&response, "createListener").unwrap_or(&response);
 
@@ -88,7 +64,7 @@ def patch_remote_pairing_mod(root: Path) -> None:
 '''
     text = once(text, anchor, quic_method + anchor, "create_quic_listener method")
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched idevice/src/remote_pairing/mod.rs with connect_any and create_quic_listener")
+    print("Successfully patched idevice/src/remote_pairing/mod.rs with create_quic_listener")
 
 def patch_tunnel_provider(root: Path) -> None:
     path = root / "ffi" / "src" / "tunnel_provider.rs"
@@ -110,11 +86,13 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
     addr: *const idevice_sockaddr,
     addr_len: idevice_socklen_t,
     hostname: *const c_char,
+    pairing_file: *mut RpPairingFileHandle,
     client_pub_b64: *const c_char,
     out_port: *mut u16,
 ) -> *mut IdeviceFfiError {
     if addr.is_null()
         || hostname.is_null()
+        || pairing_file.is_null()
         || client_pub_b64.is_null()
         || out_port.is_null()
     {
@@ -133,6 +111,7 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
         Ok(s) => s.to_string(),
         Err(_) => return ffi_err!(IdeviceError::FfiInvalidString),
     };
+    let rpf = unsafe { &mut (*pairing_file).0 };
 
     let res = run_sync_local(async {
         let stream = run_global_timeout(|| tokio::net::TcpStream::connect(socket_addr))
@@ -141,7 +120,7 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
         let conn = RpPairingSocket::new(stream);
 
         let mut rpc = RemotePairingClient::new(conn, &host);
-        rpc.connect_any().await?;
+        rpc.connect(rpf, async || None).await?;
 
         rpc.create_quic_listener(&client_pub).await
     });
@@ -177,6 +156,7 @@ def patch_idevice_h(root: Path) -> None:
 struct IdeviceFfiError *rppairing_create_quic_listener(const idevice_sockaddr *addr,
                                                        idevice_socklen_t addr_len,
                                                        const char *hostname,
+                                                       struct RpPairingFileHandle *pairing_file,
                                                        const char *client_pub_b64,
                                                        uint16_t *out_port);
 '''

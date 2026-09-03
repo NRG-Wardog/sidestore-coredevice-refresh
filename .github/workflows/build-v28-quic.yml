@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: SideStore/idevice
-          ref: master
+          ref: ebd7dadfc55d1c4facee3d11ecf5b28e20548b57
           path: idevice
           submodules: recursive
 
