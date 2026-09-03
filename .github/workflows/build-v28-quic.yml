@@ -43,7 +43,7 @@ jobs:
           cd idevice
           BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
             IPHONEOS_DEPLOYMENT_TARGET=15.0 \
-            cargo build --release --locked --target aarch64-apple-ios \
+            cargo build --release --target aarch64-apple-ios \
               --features obfuscate --manifest-path ffi/Cargo.toml
 
           test -f target/aarch64-apple-ios/release/libidevice_ffi.a
@@ -74,6 +74,8 @@ jobs:
           cp rppairing.plist Payload/LockdownDirectDiag.app/
           cp client.p12 Payload/LockdownDirectDiag.app/
           cp client_pub.b64 Payload/LockdownDirectDiag.app/
+          cp client_cert.der Payload/LockdownDirectDiag.app/
+          cp client_key.der Payload/LockdownDirectDiag.app/
           
           # Fakesign with ldid
           ldid -SEntitlements.plist Payload/LockdownDirectDiag.app/LockdownDirectDiag
