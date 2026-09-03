@@ -93,7 +93,7 @@ tinyvec = "=1.8.1"
     default_anchor = 'default = [\n'
     if default_anchor not in text:
         die("Could not find default = [ in ffi/Cargo.toml")
-    text = once(text, default_anchor, default_anchor + '  "serde_json",\n', "add serde_json to default features")
+    text = once(text, default_anchor, default_anchor + '  "dep:serde_json",\n', "add dep:serde_json to default features")
 
     path.write_text(text, encoding="utf-8")
     print("Successfully patched ffi/Cargo.toml with quinn, rustls, tinyvec, and activated serde_json")
