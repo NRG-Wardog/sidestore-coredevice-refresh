@@ -127,7 +127,6 @@ jobs:
           grep -Fq '[SS-V25-CDT] REQUEST_WRITE_PASS' "$U"
           grep -Fq '[SS-V25-CDT] HANDSHAKE_PASS' "$U"
           grep -Fq '[SS-V23-RPDIAG] RP_CONTROL_CONNECT_START' "$T"
-          grep -Fq '[SS-V23-RPDIAG] RP_TLS_PSK_START' "$T"
           grep -Fq '[SS-V23-RPDIAG] RP_RSD_HANDSHAKE_PASS' "$T"
           grep -Fq '[SS-V13-IDEVICE] LOCKDOWN_QUERY_TYPE_START' "$T"
 
@@ -219,7 +218,7 @@ jobs:
             '[SS-V23-RPDIAG] RP_CONTROL_CONNECT_START' \
             '[SS-V23-RPDIAG] RP_PAIRING_PASS' \
             '[SS-V23-RPDIAG] RP_CREATE_LISTENER_PASS' \
-            '[SS-V23-RPDIAG] RP_TLS_PSK_START' \
+            '[SS-V27-RPPROBE] V27_HANDSHAKE_START' \
             '[SS-V23-RPDIAG] RP_TUNNEL_INFO' \
             '[SS-V23-RPDIAG] RP_RSD_HANDSHAKE_PASS' \
             '[SS-V23-RPDIAG] TUNNEL_LOCK_WAIT' \

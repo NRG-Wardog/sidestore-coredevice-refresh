@@ -191,10 +191,10 @@ def patch_tunnel_provider(root: Path) -> None:
     v27_probe_chunk = r'''    let mut base_tunnel_addr = connect_addr;
     base_tunnel_addr.set_port(tunnel_port);
 
-    let mut candidates: Vec>(&'static str, std::net::SocketAddr)> = Vec::new();
-    let mut add_candidate = |label: &'static str, ip: std::net::IpADdr} {
+    let mut candidates: Vec<(&'static str, std::net::SocketAddr)> = Vec::new();
+    let mut add_candidate = |label: &'static str, ip: std::net::IpAddr| {
         let addr = std::net::SocketAddr::new(ip, tunnel_port);
-        if !candidates.iter().any((_, existing)* existing == addr) {
+        if !candidates.iter().any(|(_, existing)| *existing == addr) {
             candidates.push((label, addr));
         }
     };
@@ -229,11 +229,10 @@ def patch_tunnel_provider(root: Path) -> None:
     add_candidate("loopback-v6", std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
     add_candidate("loopback-v4", std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
 
-    tracing::error!("[SS-V27-RPPROBE] V27_PROBE_PLAN listener_port={} candidate_count={} candidates={:}", tunnel_port, candidates.len(), candidates);
+    tracing::error!("[SS-V27-RPPROBE] V27_PROBE_PLAN listener_port={} candidate_count={} candidates={:?}", tunnel_port, candidates.len(), candidates);
     let per_candidate_tcp_timeout = std::time::Duration::from_millis(2000);
     let per_candidate_hs_timeout = std::time::Duration::from_millis(4000);
     let mut selected_tunnel = None;
-
 
     for (index, (label, candidate)) in candidates.iter().enumerate() {
         let started = std::time::Instant::now();
@@ -241,14 +240,14 @@ def patch_tunnel_provider(root: Path) -> None:
         tracing::error!("[SS-V27-RPPROBE] V27_PROBE_START index={} label={} target={} route_source={} timeout_ms={}", index, label, candidate, route_source, per_candidate_tcp_timeout.as_millis());
         let stream = match tokio::time::timeout(per_candidate_tcp_timeout, tokio::net::TcpStream::connect(*candidate)).await {
             Ok(Ok(s)) => {
-                tracing::error!("[SS-V27-RPPROBE] V27_PROBE_TCP_PASS index={} label={} target={} local={:} peer={:} elapsed_ms={}", index, label, candidate, s.local_addr(), s.peer_addr(), started.elapsed().as_millis());
+                tracing::error!("[SS-V27-RPPROBE] V27_PROBE_TCP_PASS index={} label={} target={} local={:?} peer={:?} elapsed_ms={}", index, label, candidate, s.local_addr(), s.peer_addr(), started.elapsed().as_millis());
                 s
             }
             Ok(Err(error)) => {
-                tracing::error!("[SS-V27-RPPROBE] V27_PROBE_TCP_FABL index={} label={} target={} kind=socket elapsed_ms={} error={error:}", index, label, candidate, started.elapsed().as_millis());
+                tracing::error!("[SS-V27-RPPROBE] V27_PROBE_TCP_FAIL index={} label={} target={} kind=socket elapsed_ms={} error={error:?}", index, label, candidate, started.elapsed().as_millis());
                 continue;
             }
-            Err() => {
+            Err(_) => {
                 tracing::error!("[SS-V27-RPPROBE] V27_PROBE_TCP_FAIL index={} label={} target={} kind=timeout elapsed_ms={}", index, label, candidate, started.elapsed().as_millis());
                 continue;
             }
@@ -263,9 +262,9 @@ def patch_tunnel_provider(root: Path) -> None:
                 break;
             }
             Ok(Err(error)) => {
-                tracing::error!("[SS-V27-RPPROBE] V27_HANDSHAKE_FABL index={} label={} target={} elapsed_ms={} error={error:}", index, label, candidate, tls_started.elapsed().as_millis(), error);
+                tracing::error!("[SS-V27-RPPROBE] V27_HANDSHAKE_FAIL index={} label={} target={} elapsed_ms={} error={error:?}", index, label, candidate, tls_started.elapsed().as_millis(), error);
             }
-            Err() => {
+            Err(_) => {
                 tracing::error!("[SS-V27-RPPROBE] V27_HANDSHAKE_FAIL index={} label={} target={} kind=timeout elapsed_ms={}", index, label, candidate, tls_started.elapsed().as_millis());
             }
         }
