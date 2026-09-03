@@ -1,0 +1,5 @@
+# Binaries & large archives
+*.ipa
+*.a
+escapeos_*
+test_idevice/
