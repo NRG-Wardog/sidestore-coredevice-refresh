@@ -120,7 +120,7 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
         let conn = RpPairingSocket::new(stream);
 
         let mut rpc = RemotePairingClient::new(conn, &host);
-        rpc.connect(rpf, async || None).await?;
+        rpc.connect(rpf, async || String::new()).await?;
 
         rpc.create_quic_listener(&client_pub).await
     });
