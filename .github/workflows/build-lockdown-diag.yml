@@ -39,6 +39,8 @@ jobs:
           cp LockdownDirectDiag Payload/LockdownDirectDiag.app/
           cp Info.plist Payload/LockdownDirectDiag.app/
           cp pairingFile.plist Payload/LockdownDirectDiag.app/
+          cp client.p12 Payload/LockdownDirectDiag.app/
+          cp client_pub.b64 Payload/LockdownDirectDiag.app/
           
           # Fakesign with ldid
           ldid -SEntitlements.plist Payload/LockdownDirectDiag.app/LockdownDirectDiag
