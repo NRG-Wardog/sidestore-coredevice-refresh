@@ -26,14 +26,27 @@ def patch_remote_pairing_mod(root: Path) -> None:
     if anchor not in text:
         die("Could not find create_tcp_listener anchor in remote_pairing/mod.rs")
 
-    quic_method = '''    /// Autonomous connect that establishes encryption keys
+    quic_method = '''    /// Autonomous connect using the known paired peer identity
     pub async fn connect_any(&mut self) -> Result<(), IdeviceError> {
-        let _ = self.attempt_pair_verify().await;
-        let mut rpf = RpPairingFile::generate(&self.sending_host);
-        let _ = self.validate_pairing(&mut rpf).await;
-        let (cc, sc) = Self::derive_main_ciphers(&self.encryption_key);
-        self.client_cipher = cc;
-        self.server_cipher = sc;
+        self.attempt_pair_verify().await?;
+
+        let priv_bytes: [u8; 32] = [
+            0x1c, 0x75, 0x61, 0xfc, 0xa9, 0x98, 0x36, 0x05,
+            0xa1, 0xe5, 0x5d, 0x2c, 0x35, 0x9c, 0xe8, 0x2b,
+            0x4c, 0x78, 0x5b, 0xa6, 0x55, 0xc4, 0x3a, 0x2e,
+            0xde, 0xae, 0x8d, 0x32, 0x56, 0x6c, 0x07, 0x18,
+        ];
+        let ed25519_private_key = ed25519_dalek::SigningKey::from_bytes(&priv_bytes);
+        let ed25519_public_key = ed25519_dalek::VerifyingKey::from(&ed25519_private_key);
+        let mut rpf = RpPairingFile {
+            e_private_key: ed25519_private_key,
+            e_public_key: ed25519_public_key,
+            identifier: "ffae921e-5905-3998-b911-851e6f0c3cf4".to_string(),
+            alt_irk: None,
+            generated_by: None,
+        };
+
+        self.validate_pairing(&mut rpf).await?;
         Ok(())
     }
 
