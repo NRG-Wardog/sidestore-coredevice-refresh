@@ -1,0 +1,87 @@
+name: Build V28 QUIC On-Device Diag
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v28-true-utun-hairpin
+    paths:
+      - 'LockdownDirectDiag/**'
+      - 'scripts/patch_v28_quic_coredevice.py'
+      - '.github/workflows/build-v28-quic.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Checkout idevice
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: master
+          path: idevice
+          submodules: recursive
+
+      - name: Install Rust target for iOS
+        run: |
+          rustup target add aarch64-apple-ios
+
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Apply V28 QUIC CoreDevice Patch to idevice
+        run: |
+          python3 builder/scripts/patch_v28_quic_coredevice.py idevice
+
+      - name: Build idevice FFI for aarch64-apple-ios
+        run: |
+          cd idevice
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            cargo build --release --locked --target aarch64-apple-ios \
+              --features obfuscate --manifest-path ffi/Cargo.toml
+
+          test -f target/aarch64-apple-ios/release/libidevice_ffi.a
+          echo "Successfully compiled libidevice_ffi.a with native QUIC listener support!"
+
+      - name: Compile LockdownDirectDiag with Clang
+        run: |
+          cd builder/LockdownDirectDiag
+          cp ../../idevice/target/aarch64-apple-ios/release/libidevice_ffi.a ./libidevice_ffi.a
+          
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "Using iOS SDK at $SDK_PATH"
+          xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=15.0 \
+            -isysroot "$SDK_PATH" \
+            -fmodules -fcxx-modules \
+            -framework Foundation -framework UIKit -framework Security -framework Network \
+            -I. -L. -lidevice_ffi \
+            -o LockdownDirectDiag \
+            main.m AppDelegate.m ViewController.m
+
+      - name: Package Payload and Sign
+        run: |
+          cd builder/LockdownDirectDiag
+          mkdir -p Payload/LockdownDirectDiag.app
+          cp LockdownDirectDiag Payload/LockdownDirectDiag.app/
+          cp Info.plist Payload/LockdownDirectDiag.app/
+          cp pairingFile.plist Payload/LockdownDirectDiag.app/
+          cp client.p12 Payload/LockdownDirectDiag.app/
+          cp client_pub.b64 Payload/LockdownDirectDiag.app/
+          
+          # Fakesign with ldid
+          ldid -SEntitlements.plist Payload/LockdownDirectDiag.app/LockdownDirectDiag
+          
+          # Create IPA
+          zip -r ../../LockdownDirectDiag.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LockdownDirectDiag-v28-quic
+          path: LockdownDirectDiag.ipa
