@@ -80,20 +80,23 @@ def patch_ffi_cargo_toml(root: Path) -> None:
         print("ffi/Cargo.toml already has quinn dependency")
         return
 
-    # Make existing optional serde_json non-optional
-    text = text.replace('serde_json = { version = "1", optional = true }', 'serde_json = "1"')
-
-    anchor = "[dependencies]\n"
-    if anchor not in text:
+    dep_anchor = "[dependencies]\n"
+    if dep_anchor not in text:
         die("Could not find [dependencies] in ffi/Cargo.toml")
 
     dep = '''quinn = { version = "0.11.11", default-features = false, features = ["rustls-aws-lc-rs", "runtime-tokio"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
 tinyvec = "=1.8.1"
 '''
-    text = once(text, anchor, anchor + dep, "add quinn, rustls, tinyvec dependencies")
+    text = once(text, dep_anchor, dep_anchor + dep, "add quinn, rustls, tinyvec dependencies")
+
+    default_anchor = 'default = [\n'
+    if default_anchor not in text:
+        die("Could not find default = [ in ffi/Cargo.toml")
+    text = once(text, default_anchor, default_anchor + '  "serde_json",\n', "add serde_json to default features")
+
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched ffi/Cargo.toml with quinn, rustls, non-optional serde_json, and tinyvec")
+    print("Successfully patched ffi/Cargo.toml with quinn, rustls, tinyvec, and activated serde_json")
 
 def patch_tunnel_provider(root: Path) -> None:
     path = root / "ffi" / "src" / "tunnel_provider.rs"
