@@ -1,0 +1,53 @@
+name: Build LockdownDirectDiag IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [v28-true-utun-hairpin, main]
+    paths:
+      - "LockdownDirectDiag/**"
+      - ".github/workflows/build-lockdown-diag.yml"
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Compile App Binary with clang
+        run: |
+          cd LockdownDirectDiag
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "Using iOS SDK at $SDK_PATH"
+          xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=15.0 \
+            -isysroot "$SDK_PATH" \
+            -fmodules -fcxx-modules \
+            -framework Foundation -framework UIKit -framework Security -framework Network \
+            -I. -L. -lidevice_ffi \
+            -o LockdownDirectDiag \
+            main.m AppDelegate.m ViewController.m
+
+      - name: Package Payload and Sign
+        run: |
+          cd LockdownDirectDiag
+          mkdir -p Payload/LockdownDirectDiag.app
+          cp LockdownDirectDiag Payload/LockdownDirectDiag.app/
+          cp Info.plist Payload/LockdownDirectDiag.app/
+          cp pairingFile.plist Payload/LockdownDirectDiag.app/
+          
+          # Fakesign with ldid
+          ldid -SEntitlements.plist Payload/LockdownDirectDiag.app/LockdownDirectDiag
+          
+          # Create IPA
+          zip -r ../LockdownDirectDiag.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LockdownDirectDiag
+          path: LockdownDirectDiag.ipa
