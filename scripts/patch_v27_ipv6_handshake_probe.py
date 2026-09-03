@@ -262,7 +262,7 @@ def patch_tunnel_provider(root: Path) -> None:
                 break;
             }
             Ok(Err(error)) => {
-                tracing::error!("[SS-V27-RPPROBE] V27_HANDSHAKE_FAIL index={} label={} target={} elapsed_ms={} error={error:?}", index, label, candidate, tls_started.elapsed().as_millis(), error);
+                tracing::error!("[SS-V27-RPPROBE] V27_HANDSHAKE_FAIL index={} label={} target={} elapsed_ms={} error={error:?}", index, label, candidate, tls_started.elapsed().as_millis());
             }
             Err(_) => {
                 tracing::error!("[SS-V27-RPPROBE] V27_HANDSHAKE_FAIL index={} label={} target={} kind=timeout elapsed_ms={}", index, label, candidate, tls_started.elapsed().as_millis());
