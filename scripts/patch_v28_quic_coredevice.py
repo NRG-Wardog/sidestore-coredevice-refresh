@@ -26,7 +26,18 @@ def patch_remote_pairing_mod(root: Path) -> None:
     if anchor not in text:
         die("Could not find create_tcp_listener anchor in remote_pairing/mod.rs")
 
-    quic_method = '''    /// Send a request to create a QUIC tunnel listener on the device.
+    quic_method = '''    /// Autonomous connect that establishes encryption keys
+    pub async fn connect_any(&mut self) -> Result<(), IdeviceError> {
+        let _ = self.attempt_pair_verify().await;
+        let mut rpf = RpPairingFile::generate(&self.sending_host);
+        let _ = self.validate_pairing(&mut rpf).await;
+        let (cc, sc) = Self::derive_main_ciphers(&self.encryption_key);
+        self.client_cipher = cc;
+        self.server_cipher = sc;
+        Ok(())
+    }
+
+    /// Send a request to create a QUIC tunnel listener on the device.
     /// Returns the dynamic UDP port the device is listening on.
     pub async fn create_quic_listener(&mut self, client_pub_b64: &str) -> Result<u16, IdeviceError> {
         let request = plist!({
@@ -64,7 +75,7 @@ def patch_remote_pairing_mod(root: Path) -> None:
 '''
     text = once(text, anchor, quic_method + anchor, "create_quic_listener method")
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched idevice/src/remote_pairing/mod.rs with create_quic_listener")
+    print("Successfully patched idevice/src/remote_pairing/mod.rs with connect_any and create_quic_listener")
 
 def patch_tunnel_provider(root: Path) -> None:
     path = root / "ffi" / "src" / "tunnel_provider.rs"
@@ -86,13 +97,11 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
     addr: *const idevice_sockaddr,
     addr_len: idevice_socklen_t,
     hostname: *const c_char,
-    pairing_file: *mut RpPairingFileHandle,
     client_pub_b64: *const c_char,
     out_port: *mut u16,
 ) -> *mut IdeviceFfiError {
     if addr.is_null()
         || hostname.is_null()
-        || pairing_file.is_null()
         || client_pub_b64.is_null()
         || out_port.is_null()
     {
@@ -111,7 +120,6 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
         Ok(s) => s.to_string(),
         Err(_) => return ffi_err!(IdeviceError::FfiInvalidString),
     };
-    let rpf = unsafe { &mut (*pairing_file).0 };
 
     let res = run_sync_local(async {
         let stream = run_global_timeout(|| tokio::net::TcpStream::connect(socket_addr))
@@ -120,7 +128,7 @@ pub unsafe extern "C" fn rppairing_create_quic_listener(
         let conn = RpPairingSocket::new(stream);
 
         let mut rpc = RemotePairingClient::new(conn, &host);
-        rpc.connect(rpf, async || get_pin(None, &PinCtx(null_mut()))).await?;
+        rpc.connect_any().await?;
 
         rpc.create_quic_listener(&client_pub).await
     });
@@ -156,7 +164,6 @@ def patch_idevice_h(root: Path) -> None:
 struct IdeviceFfiError *rppairing_create_quic_listener(const idevice_sockaddr *addr,
                                                        idevice_socklen_t addr_len,
                                                        const char *hostname,
-                                                       struct RpPairingFileHandle *pairing_file,
                                                        const char *client_pub_b64,
                                                        uint16_t *out_port);
 '''
