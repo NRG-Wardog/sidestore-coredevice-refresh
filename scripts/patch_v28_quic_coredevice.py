@@ -511,6 +511,16 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinHandle;
 
+extern "C" {
+    fn lockdown_diag_rust_log(msg: *const std::ffi::c_char);
+}
+
+fn diag_log(s: &str) {
+    if let Ok(c) = std::ffi::CString::new(s) {
+        unsafe { lockdown_diag_rust_log(c.as_ptr()); }
+    }
+}
+
 static ACTIVE_HEARTBEAT: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static HEARTBEAT_IS_ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -525,7 +535,7 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
     if let Some(handle) = lock.take() {
         handle.abort();
         HEARTBEAT_IS_ACTIVE.store(false, Ordering::SeqCst);
-        eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_STOPPED_CLEANLY");
+        diag_log("[LOCKDOWN_DIAG] HEARTBEAT_STOPPED_CLEANLY");
     }
 }
 '''
@@ -540,7 +550,7 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
             let mut lock = ACTIVE_HEARTBEAT.lock().unwrap();
             if let Some(prev) = lock.take() {
                 prev.abort();
-                eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_STOPPED_CLEANLY");
+                diag_log("[LOCKDOWN_DIAG] HEARTBEAT_STOPPED_CLEANLY");
             }
             HEARTBEAT_IS_ACTIVE.store(false, Ordering::SeqCst);
         }
@@ -551,11 +561,11 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
         use idevice::heartbeat::HeartbeatClient;
         let mut hb = match HeartbeatClient::connect(provider_ref).await {
             Ok(hb) => {
-                eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_CONNECT_PASS");
+                diag_log("[LOCKDOWN_DIAG] HEARTBEAT_CONNECT_PASS");
                 hb
             }
             Err(e) => {
-                eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_CONNECT_FAIL: {e}");
+                diag_log(&format!("[LOCKDOWN_DIAG] HEARTBEAT_CONNECT_FAIL: {e}"));
                 return Err(IdeviceError::InternalError(format!("Heartbeat connection required but failed: {e}")));
             }
         };
@@ -565,14 +575,18 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
             loop {
                 match hb.get_marco(60).await {
                     Ok(_) => {
-                        eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_MARCO_RECEIVED");
+                        diag_log("[LOCKDOWN_DIAG] HEARTBEAT_MARCO_RECEIVED");
                         if hb.send_polo().await.is_ok() {
-                            eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_POLO_SENT");
+                            diag_log("[LOCKDOWN_DIAG] HEARTBEAT_POLO_SENT");
                         } else {
+                            diag_log("[LOCKDOWN_DIAG] HEARTBEAT_POLO_FAIL");
                             break;
                         }
                     }
-                    Err(_) => break,
+                    Err(e) => {
+                        diag_log(&format!("[LOCKDOWN_DIAG] HEARTBEAT_MARCO_FAIL: {e}"));
+                        break;
+                    }
                 }
             }
             HEARTBEAT_IS_ACTIVE.store(false, Ordering::SeqCst);
