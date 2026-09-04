@@ -496,6 +496,47 @@ def patch_cdtunnel_atomic_write(root: Path) -> None:
     path.write_text(text, encoding="utf-8")
     print("Successfully patched idevice/src/tunnel.rs with single TLS record write for CDTunnel")
 
+def patch_tunnel_usb_heartbeat(root: Path) -> None:
+    path = root / "ffi" / "src" / "tunnel_provider.rs"
+    if not path.exists():
+        die(f"tunnel_provider.rs not found at {path}")
+    text = path.read_text(encoding="utf-8")
+    if "HeartbeatClient::connect" in text:
+        print("tunnel_provider.rs already has HeartbeatClient keep-alive")
+        return
+
+    old = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
+        let proxy = CoreDeviceProxy::connect(provider_ref).await?;'''
+
+    new = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
+
+        // For network / reflected utun connections, iOS remotepairingdeviced requires an active
+        // com.apple.mobile.heartbeat connection; otherwise heartbeatd deallocates the watcher and
+        // drops the tunnel connection within 88ms.
+        use idevice::heartbeat::HeartbeatClient;
+        if let Ok(mut hb) = HeartbeatClient::connect(provider_ref).await {
+            tracing::info!("[HEARTBEAT] com.apple.mobile.heartbeat connected, starting keep-alive loop");
+            tokio::spawn(async move {
+                loop {
+                    match hb.get_marco(60).await {
+                        Ok(_) => {
+                            if hb.send_polo().await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        }
+
+        let proxy = CoreDeviceProxy::connect(provider_ref).await?;'''
+
+    text = once(text, old, new, "tunnel_create_usb heartbeat keep-alive in tunnel_provider.rs")
+    path.write_text(text, encoding="utf-8")
+    print("Successfully patched tunnel_create_usb with HeartbeatClient keep-alive loop")
+
 def main():
     if len(sys.argv) < 2:
         die("Usage: patch_v28_quic_coredevice.py <idevice-repo-root>")
@@ -507,8 +548,10 @@ def main():
     patch_tunnel_provider(root)
     patch_idevice_h(root)
     patch_cdtunnel_atomic_write(root)
+    patch_tunnel_usb_heartbeat(root)
     print("ALL V28 QUIC COREDEVICE PATCHES APPLIED SUCCESSFULLY!")
 
 if __name__ == '__main__':
     main()
+
 
