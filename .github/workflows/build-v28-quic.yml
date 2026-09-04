@@ -62,7 +62,7 @@ jobs:
             -framework Foundation -framework UIKit -framework Security -framework Network \
             -I. -L. -lidevice_ffi \
             -o LockdownDirectDiag \
-            main.m AppDelegate.m ViewController.m
+            main.m AppDelegate.m ViewController.m LocalTunnelEndpointResolver.m
 
       - name: Package Payload and Sign
         run: |

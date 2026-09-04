@@ -471,6 +471,29 @@ struct IdeviceFfiError *rppairing_connect_quic_tunnel(const idevice_sockaddr *ad
     path.write_text(text, encoding="utf-8")
     print("Successfully patched ffi/idevice.h with rppairing_connect_quic_tunnel declaration")
 
+def patch_coredevice_proxy_nossl(root: Path) -> None:
+    path = root / "idevice" / "src" / "lib.rs"
+    if not path.exists():
+        die(f"idevice/src/lib.rs not found at {path}")
+    text = path.read_text(encoding="utf-8")
+    if 'Self::service_name() != "com.apple.internal.devicecompute.CoreDeviceProxy"' in text:
+        print("idevice/src/lib.rs already has CoreDeviceProxy raw CDTunnel fix")
+        return
+
+    old = '''        if ssl {
+            idevice
+                .start_session(&provider.get_pairing_file().await?, legacy)
+                .await?;
+        }'''
+    new = '''        if ssl && Self::service_name() != "com.apple.internal.devicecompute.CoreDeviceProxy" {
+            idevice
+                .start_session(&provider.get_pairing_file().await?, legacy)
+                .await?;
+        }'''
+    text = once(text, old, new, "disable SSL on CoreDeviceProxy service in lib.rs")
+    path.write_text(text, encoding="utf-8")
+    print("Successfully patched idevice/src/lib.rs to preserve raw CDTunnel on CoreDeviceProxy")
+
 def main():
     if len(sys.argv) < 2:
         die("Usage: patch_v28_quic_coredevice.py <idevice-repo-root>")
@@ -481,7 +504,9 @@ def main():
     patch_ffi_cargo_toml(root)
     patch_tunnel_provider(root)
     patch_idevice_h(root)
+    patch_coredevice_proxy_nossl(root)
     print("ALL V28 QUIC COREDEVICE PATCHES APPLIED SUCCESSFULLY!")
 
 if __name__ == '__main__':
     main()
+
