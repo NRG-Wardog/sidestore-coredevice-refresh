@@ -448,7 +448,7 @@ func lockdownDiagRustLog(_ message: UnsafePointer<CChar>?) {
             throw IdeviceGatewayError(.serviceError, reason: "Post-install browse returned no result")
         }
         let applications = result.assumingMemoryBound(to: plist_t?.self)
-        defer { idevice_plist_array_free(applications, count) }
+        defer { idevice_plist_array_free(applications, UInt(count)) }
 
         var matchedIdentifier: String? = nil
         var matchedVersion: String? = nil
@@ -512,7 +512,7 @@ func lockdownDiagRustLog(_ message: UnsafePointer<CChar>?) {
             var container = ""
 """,
         """            let plistArray = resultPtr.assumingMemoryBound(to: plist_t?.self)
-            defer { idevice_plist_array_free(plistArray, outLen) }
+            defer { idevice_plist_array_free(plistArray, UInt(outLen)) }
             var container = ""
 """,
         "browse result ownership",
@@ -537,6 +537,68 @@ func lockdownDiagRustLog(_ message: UnsafePointer<CChar>?) {
        try performWithEitherService(
 """
     text = replace_once(text, old_heartbeat, new_heartbeat, "avoid duplicate heartbeat client")
+
+    text = replace_once(
+        text,
+        """        var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
+        var peerDevicePtr: UnsafeMutablePointer<RpPairingPeerDeviceC>? = nil
+""",
+        """        var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
+""",
+        "pinned rppairing result type",
+    )
+    text = replace_once(
+        text,
+        """                    },
+                    pinContextPtr,
+                    &peerDevicePtr
+                )""",
+        """                    },
+                    pinContextPtr
+                )""",
+        "pinned rppairing arguments",
+    )
+    text = replace_once(
+        text,
+        """        var peerName = hostName
+        var peerModel = hostModel
+        var peerUdid: String? = nil
+        var peerAltIrk: [UInt8]? = nil
+
+        if let peer = peerDevicePtr {
+            defer { rppairing_peer_device_free(peer) }
+            let p = peer.pointee
+            if let namePtr = p.name {
+                peerName = String(cString: namePtr)
+            }
+            if let modelPtr = p.model {
+                peerModel = String(cString: modelPtr)
+            }
+            if let udidPtr = p.udid {
+                peerUdid = String(cString: udidPtr)
+            }
+            peerAltIrk = withUnsafeBytes(of: p.alt_irk) { Array($0) }
+        }
+
+        return try finalizeAndSavePairedDevice(
+            rpf: rpf,
+            hostName: peerName,
+            hostModel: peerModel,
+            outPath: outPath,
+            fallbackUdid: peerUdid ?? identifier,
+            initialAltIrk: peerAltIrk
+        )""",
+        """        // This idevice revision updates rpf in place and exposes no peer-result struct.
+        return try finalizeAndSavePairedDevice(
+            rpf: rpf,
+            hostName: hostName,
+            hostModel: hostModel,
+            outPath: outPath,
+            fallbackUdid: identifier,
+            initialAltIrk: nil
+        )""",
+        "pinned rppairing metadata",
+    )
 
     dispatch_count = text.count("withFFIDispatch {")
     if dispatch_count < 10:
@@ -582,14 +644,18 @@ def verify_gateway(text: str) -> None:
         "STAGED_FILE_SIZE_MATCH",
         "SIDESTORE_INSTALL_COMPLETE",
         "SIDESTORE_POST_INSTALL_VERIFY_PASS",
-        "idevice_plist_array_free(applications, count)",
-        "idevice_plist_array_free(plistArray, outLen)",
+        "idevice_plist_array_free(applications, UInt(count))",
+        "idevice_plist_array_free(plistArray, UInt(outLen))",
     ]
     missing = [needle for needle in required if needle not in text]
     if missing:
         die(f"gateway verification failed: {missing}")
     if "free(outResult)" in text:
         die("gateway still uses free(outResult) for a Rust plist array")
+    unsupported = ["RpPairingPeerDeviceC", "rppairing_peer_device_free"]
+    present = [needle for needle in unsupported if needle in text]
+    if present:
+        die(f"gateway still uses unsupported pinned idevice APIs: {present}")
 
 
 def patch_sign_marker(sidestore: Path) -> None:

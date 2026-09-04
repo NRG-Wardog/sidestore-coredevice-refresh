@@ -162,7 +162,7 @@ jobs:
 
           grep -Fq 'tunnel_create_usb(provider, &adapter, &handshake)' "$GATEWAY"
           grep -Fq 'withFFIDispatch(on: self.ffiQueue)' "$GATEWAY"
-          grep -Fq 'idevice_plist_array_free(applications, count)' "$GATEWAY"
+          grep -Fq 'idevice_plist_array_free(applications, UInt(count))' "$GATEWAY"
           grep -Fq 'CoreDevice heartbeat is maintained by Rust; poll its state without spinning.' \
             "$MUX/Sources/Services/HeartbeatService.swift"
           grep -Fq 'SIDESTORE_SIGN_PASS' "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
