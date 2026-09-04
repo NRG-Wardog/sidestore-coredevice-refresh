@@ -627,6 +627,68 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
             cdp_path.write_text(cdp_text, encoding="utf-8")
             print("Successfully hooked adapter_free to stop heartbeat")
 
+def patch_afc_file_runtime(root: Path) -> None:
+    """Keep AFC file descriptor futures on the runtime driving the RSD adapter.
+
+    AFC file descriptors borrow their parent client and are opened while
+    LOCAL_RUNTIME drives the userspace tunnel.  Running later descriptor
+    operations on GLOBAL_RUNTIME leaves the adapter's response path idle on
+    the other runtime, so the first AFC write can wait forever.
+    """
+    path = root / "ffi" / "src" / "afc.rs"
+    if not path.exists():
+        die(f"afc.rs not found at {path}")
+    text = path.read_text(encoding="utf-8")
+    marker = "// V28: AFC file descriptor operations use LOCAL_RUNTIME"
+    if marker in text:
+        print("ffi/src/afc.rs already uses LOCAL_RUNTIME for file descriptors")
+        return
+
+    replacements = [
+        (
+            "    let res: Result<(), IdeviceError> = run_sync(async move { fd.close().await });",
+            "    // V28: AFC file descriptor operations use LOCAL_RUNTIME\n"
+            "    let res: Result<(), IdeviceError> = run_sync_local(async move { fd.close().await });",
+            "AFC file close runtime",
+        ),
+        (
+            "    let res: Result<Vec<u8>, IdeviceError> = run_sync({",
+            "    let res: Result<Vec<u8>, IdeviceError> = run_sync_local({",
+            "AFC file read runtime",
+        ),
+        (
+            "    let res: Result<Vec<u8>, IdeviceError> = run_sync(async move { fd.read_entire().await });",
+            "    let res: Result<Vec<u8>, IdeviceError> = run_sync_local(async move { fd.read_entire().await });",
+            "AFC file read-entire runtime",
+        ),
+        (
+            "    let res: Result<u64, IdeviceError> = run_sync(async move { Ok(fd.seek(seek_from).await?) });",
+            "    let res: Result<u64, IdeviceError> = run_sync_local(async move { Ok(fd.seek(seek_from).await?) });",
+            "AFC file seek runtime",
+        ),
+        (
+            "        run_sync(async { Ok(fd.seek(SeekFrom::Current(0)).await?) });",
+            "        run_sync_local(async { Ok(fd.seek(SeekFrom::Current(0)).await?) });",
+            "AFC file tell runtime",
+        ),
+        (
+            "    let res: Result<(), IdeviceError> = run_sync(async move { fd.write_entire(data_slice).await });",
+            "    let res: Result<(), IdeviceError> = run_sync_local(async move { fd.write_entire(data_slice).await });",
+            "AFC file write runtime",
+        ),
+    ]
+
+    for anchor, replacement, label in replacements:
+        text = once(text, anchor, replacement, label)
+    text = once(
+        text,
+        "    run_sync, run_sync_local,\n",
+        "    run_sync_local,\n",
+        "remove unused global AFC runtime import",
+    )
+    path.write_text(text, encoding="utf-8")
+    print("Successfully patched AFC file descriptor operations onto LOCAL_RUNTIME")
+
 def main():
     if len(sys.argv) < 2:
         die("Usage: patch_v28_quic_coredevice.py <idevice-repo-root>")
@@ -639,9 +701,8 @@ def main():
     patch_idevice_h(root)
     patch_cdtunnel_atomic_write(root)
     patch_tunnel_usb_heartbeat(root)
+    patch_afc_file_runtime(root)
     print("ALL V28 QUIC COREDEVICE PATCHES APPLIED SUCCESSFULLY!")
 
 if __name__ == '__main__':
     main()
-
-
