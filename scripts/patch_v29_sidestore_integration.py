@@ -32,6 +32,171 @@ def replace_region(text: str, start: str, end: str, replacement: str, label: str
     return text[:start_index] + replacement + text[end_index:]
 
 
+def patch_coredevice_route_selection(minimuxer: Path) -> None:
+    pairing_path = minimuxer / "Common" / "PairingProtocol.swift"
+    pairing_text = pairing_path.read_text(encoding="utf-8")
+    pairing_marker = "Composite records must use Lockdown/CoreDevice"
+    if pairing_marker not in pairing_text:
+        old_validation = '''        let requiredRPKeys = [
+            "private_key",
+            "public_key",
+            "identifier"
+        ]
+        let missingRPKeys = requiredRPKeys.filter { plist[$0] == nil }
+        if missingRPKeys.isEmpty {
+            return .rppairing
+        }
+
+        let requiredLockdownKeys = [
+            "WiFiMACAddress",
+            "SystemBUID",
+            "RootPrivateKey",
+            "HostPrivateKey",
+            "HostID",
+            "RootCertificate",
+            "UDID",
+            "EscrowBag",
+            "HostCertificate",
+            "DeviceCertificate"
+        ]
+        let missingLockdownKeys = requiredLockdownKeys.filter { plist[$0] == nil }
+        if missingLockdownKeys.isEmpty {
+            return .lockdown
+        }
+'''
+        new_validation = '''        let requiredLockdownKeys = [
+            "WiFiMACAddress",
+            "SystemBUID",
+            "RootPrivateKey",
+            "HostPrivateKey",
+            "HostID",
+            "RootCertificate",
+            "UDID",
+            "EscrowBag",
+            "HostCertificate",
+            "DeviceCertificate"
+        ]
+        let missingLockdownKeys = requiredLockdownKeys.filter { plist[$0] == nil }
+        // Composite records must use Lockdown/CoreDevice; RemotePairing TCP is not
+        // viable for same-device operation on current iOS releases.
+        if missingLockdownKeys.isEmpty {
+            return .lockdown
+        }
+
+        let requiredRPKeys = [
+            "private_key",
+            "public_key",
+            "identifier"
+        ]
+        let missingRPKeys = requiredRPKeys.filter { plist[$0] == nil }
+        if missingRPKeys.isEmpty {
+            return .rppairing
+        }
+'''
+        pairing_text = replace_once(
+            pairing_text,
+            old_validation,
+            new_validation,
+            "prefer Lockdown for composite pairing records",
+        )
+        pairing_path.write_text(pairing_text, encoding="utf-8")
+    if pairing_marker not in pairing_text:
+        die("composite pairing mode preference missing")
+
+    observer_path = minimuxer / "Sources" / "Services" / "NetworkObserverService.swift"
+    observer_text = observer_path.read_text(encoding="utf-8")
+    endpoint_marker = "[SIDESTORE_COREDEVICE] ENDPOINT_SELECT"
+    if endpoint_marker not in observer_text:
+        old_selection = '''                    let overrideIp = await manager.overridePeerIp
+                    let isOverridden = !(overrideIp ?? "").isEmpty
+
+                    let effectiveIp = await isOverridden
+                            ? (manager.isOverridePeerIpReachable ? overrideIp : nil)            // when override active, we don't question user intent
+                            : (manager.isDerivedPeerIpReachable ? manager.derivedPeerIp : nil)  // only if not overriden, we try to use auto discovered
+                    let effectivePeer = isOverridden ? "overridePeer" : "derivedPeerIp"
+'''
+        new_selection = '''                    let overrideIp = await manager.overridePeerIp
+                    let overrideReachable = await manager.isOverridePeerIpReachable
+                    let derivedIp = await manager.derivedPeerIp
+                    let derivedReachable = await manager.isDerivedPeerIpReachable
+
+                    let effectiveIp: String?
+                    let effectivePeer: String
+                    if let overrideIp, overrideReachable {
+                        effectiveIp = overrideIp
+                        effectivePeer = "overridePeer"
+                    } else if let derivedIp, derivedReachable {
+                        effectiveIp = derivedIp
+                        effectivePeer = "derivedPeerIp"
+                    } else {
+                        effectiveIp = nil
+                        effectivePeer = "none"
+                    }
+                    debugLog(
+                        "[SIDESTORE_COREDEVICE] ENDPOINT_SELECT " +
+                        "override_present=\\(overrideIp != nil) override_reachable=\\(overrideReachable) " +
+                        "derived_present=\\(derivedIp != nil) derived_reachable=\\(derivedReachable) " +
+                        "selected_source=\\(effectivePeer)"
+                    )
+'''
+        observer_text = replace_once(
+            observer_text,
+            old_selection,
+            new_selection,
+            "CoreDevice endpoint fallback",
+        )
+        observer_path.write_text(observer_text, encoding="utf-8")
+    if endpoint_marker not in observer_text:
+        die("CoreDevice endpoint selection logging missing")
+
+    implementation_path = minimuxer / "Sources" / "MinimuxerImpl.swift"
+    implementation_text = implementation_path.read_text(encoding="utf-8")
+    utun_marker = "[SIDESTORE_COREDEVICE] LOCALVPN_UTUN_ACCEPTED"
+    if utun_marker not in implementation_text:
+        old_ipsec_requirement = '''                // check iKEv2 too if in lockdown mode and ios >= 26.4
+                if !isrppairing && !net.isIKEv2IPSecAvailable {
+                    if #available(iOS 26.4, *) {
+                        debugLog("[minimuxer] minimuxer not ready: no ipsec interface (required for lockdown on iOS 26.4+)")
+                        return .failure(.invalidVPN("utun is present but no ipsec/IKEv2 interface found — LocalDevVPN may not support the lockdown protocol on iOS 26.4+"))
+                    }
+                }
+'''
+        new_utun_policy = '''                if !isrppairing {
+                    verboseLog("[SIDESTORE_COREDEVICE] LOCALVPN_UTUN_ACCEPTED transport=lockdown-coredevice")
+                }
+'''
+        implementation_text = replace_once(
+            implementation_text,
+            old_ipsec_requirement,
+            new_utun_policy,
+            "remove obsolete IKEv2 requirement from CoreDevice path",
+        )
+        implementation_path.write_text(implementation_text, encoding="utf-8")
+    if utun_marker not in implementation_text:
+        die("CoreDevice LocalDevVPN utun policy missing")
+
+    gateway_path = minimuxer / "DeviceGateway" / "idevice" / "IdeviceGateway.swift"
+    gateway_text = gateway_path.read_text(encoding="utf-8")
+    pairing_mode_marker = "[SIDESTORE_COREDEVICE] PAIRING_MODE_SELECTED"
+    if pairing_mode_marker not in gateway_text:
+        gateway_text = replace_once(
+            gateway_text,
+            '''            self.pairingFileData = parsedPairingFile.rawData
+            self.pairingFileType = parsedPairingFile.mode
+            self.isRPPairing = (parsedPairingFile.mode == .rppairing)
+''',
+            '''            self.pairingFileData = parsedPairingFile.rawData
+            self.pairingFileType = parsedPairingFile.mode
+            self.isRPPairing = (parsedPairingFile.mode == .rppairing)
+            debugLog("[SIDESTORE_COREDEVICE] PAIRING_MODE_SELECTED mode=\\(parsedPairingFile.mode)")
+''',
+            "pairing mode selection logging",
+        )
+        gateway_path.write_text(gateway_text, encoding="utf-8")
+    if pairing_mode_marker not in gateway_text:
+        die("CoreDevice pairing mode selection logging missing")
+
+
 def patch_gateway(minimuxer: Path) -> None:
     path = minimuxer / "DeviceGateway" / "idevice" / "IdeviceGateway.swift"
     text = path.read_text(encoding="utf-8")
@@ -782,6 +947,7 @@ def main() -> None:
     if not (sidestore / "AltStore.xcodeproj").is_dir():
         die(f"invalid SideStore checkout: {sidestore}")
 
+    patch_coredevice_route_selection(minimuxer)
     patch_gateway(minimuxer)
     patch_heartbeat_service(minimuxer)
     patch_sign_marker(sidestore)

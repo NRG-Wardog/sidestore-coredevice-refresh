@@ -163,16 +163,66 @@ jobs:
           python3 builder/scripts/patch_v22_local_idevice_package.py "$MUX"
 
           GATEWAY="$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
+          PAIRING_PROTOCOL="$MUX/Common/PairingProtocol.swift"
+          NETWORK_OBSERVER="$MUX/Sources/Services/NetworkObserverService.swift"
+          MINIMUXER_IMPL="$MUX/Sources/MinimuxerImpl.swift"
           swiftc -frontend -parse "$GATEWAY"
+          swiftc -frontend -parse "$PAIRING_PROTOCOL"
+          swiftc -frontend -parse "$NETWORK_OBSERVER"
+          swiftc -frontend -parse "$MINIMUXER_IMPL"
           swiftc -frontend -parse "$MUX/Sources/Services/HeartbeatService.swift"
           swiftc -frontend -parse "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
           swiftc -frontend -parse "$SIDE/AltStore/AppDelegate.swift"
           swift package --package-path "$MUX/DeviceGateway" dump-package >/tmp/v29-gateway-package.json
 
           grep -Fq 'tunnel_create_usb(provider, &adapter, &handshake)' "$GATEWAY"
+          grep -Fq '[SIDESTORE_COREDEVICE] PAIRING_MODE_SELECTED' "$GATEWAY"
           grep -Fq 'idevice_set_transport_log_callback(sideStoreTransportLog)' "$GATEWAY"
           grep -Fq 'withFFIDispatch(on: self.ffiQueue)' "$GATEWAY"
           grep -Fq 'idevice_plist_array_free(applications, UInt(count))' "$GATEWAY"
+          grep -Fq 'Composite records must use Lockdown/CoreDevice' "$PAIRING_PROTOCOL"
+          grep -Fq '[SIDESTORE_COREDEVICE] ENDPOINT_SELECT' "$NETWORK_OBSERVER"
+          grep -Fq '[SIDESTORE_COREDEVICE] LOCALVPN_UTUN_ACCEPTED' "$MINIMUXER_IMPL"
+          ! grep -Fq 'no ipsec interface (required for lockdown on iOS 26.4+)' "$MINIMUXER_IMPL"
+          python3 - "$PAIRING_PROTOCOL" <<'PY'
+          from pathlib import Path
+          import sys
+
+          text = Path(sys.argv[1]).read_text(encoding="utf-8")
+          lockdown = text.index('let requiredLockdownKeys = [')
+          remote_pairing = text.index('let requiredRPKeys = [')
+          assert lockdown < remote_pairing, "composite pairing records do not prefer Lockdown"
+          PY
+          cat >/tmp/main.swift <<'SWIFT'
+          import Foundation
+
+          let lockdownKeys = [
+              "WiFiMACAddress", "SystemBUID", "RootPrivateKey", "HostPrivateKey",
+              "HostID", "RootCertificate", "UDID", "EscrowBag",
+              "HostCertificate", "DeviceCertificate",
+          ]
+          let remotePairingKeys = ["private_key", "public_key", "identifier"]
+
+          func record(_ keys: [String]) -> [String: any Sendable] {
+              var result: [String: any Sendable] = [:]
+              for key in keys {
+                  result[key] = "present"
+              }
+              return result
+          }
+
+          let lockdownMode = try PairingProtocol.validatePairingFile(from: record(lockdownKeys))
+          let remotePairingMode = try PairingProtocol.validatePairingFile(from: record(remotePairingKeys))
+          let compositeMode = try PairingProtocol.validatePairingFile(
+              from: record(lockdownKeys + remotePairingKeys)
+          )
+          precondition(lockdownMode == .lockdown)
+          precondition(remotePairingMode == .rppairing)
+          precondition(compositeMode == .lockdown)
+          print("pairing protocol selection tests passed")
+          SWIFT
+          swiftc "$PAIRING_PROTOCOL" /tmp/main.swift -o /tmp/v29-pairing-selection-test
+          /tmp/v29-pairing-selection-test
           grep -Fq 'CoreDevice heartbeat is maintained by Rust; poll its state without spinning.' \
             "$MUX/Sources/Services/HeartbeatService.swift"
           grep -Fq 'SIDESTORE_SIGN_PASS' "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
@@ -223,7 +273,10 @@ jobs:
           find /tmp/v29-ipa/Payload/SideStore.app -type f -size +32k -print0 \
             | xargs -0 strings >/tmp/v29-strings.txt
           for marker in \
+            '[SIDESTORE_COREDEVICE] PAIRING_MODE_SELECTED' \
             '[SIDESTORE_COREDEVICE] TRANSPORT_CREATE_PASS' \
+            '[SIDESTORE_COREDEVICE] ENDPOINT_SELECT' \
+            '[SIDESTORE_COREDEVICE] LOCALVPN_UTUN_ACCEPTED' \
             '[SIDESTORE_COREDEVICE] JKTCP_MSS_CONFIG' \
             '[SELF_REFRESH] SIDESTORE_SIGN_PASS' \
             '[SELF_REFRESH] SIDESTORE_STAGE_PASS' \
