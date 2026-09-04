@@ -511,7 +511,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinHandle;
 
-extern "C" {
+unsafe extern "C" {
     fn lockdown_diag_rust_log(msg: *const std::ffi::c_char);
 }
 
