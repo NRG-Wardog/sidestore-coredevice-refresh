@@ -135,10 +135,14 @@ jobs:
           grep -Fq 'tunnel_create_usb' ffi/idevice.h
           grep -Fq 'tunnel_heartbeat_is_active' ffi/idevice.h
           grep -Fq 'idevice_set_transport_log_callback' ffi/idevice.h
+          # Apple nm cannot read LLVM metadata in some Rust compiler_builtins
+          # members, but it still emits symbols from the FFI members we need.
           xcrun nm -arch arm64 -g target/aarch64-apple-ios/release/libidevice_ffi.a \
-            | grep -E '[[:space:]][Tt][[:space:]]_lockdown_diag_rust_log$'
-          xcrun nm -arch arm64 -g target/aarch64-apple-ios/release/libidevice_ffi.a \
-            | grep -E '[[:space:]][Tt][[:space:]]_idevice_set_transport_log_callback$'
+            >/tmp/v29-idevice-symbols.txt 2>/tmp/v29-nm-reader-warnings.txt || true
+          grep -E '[[:space:]][Tt][[:space:]]_lockdown_diag_rust_log$' \
+            /tmp/v29-idevice-symbols.txt
+          grep -E '[[:space:]][Tt][[:space:]]_idevice_set_transport_log_callback$' \
+            /tmp/v29-idevice-symbols.txt
           rm -rf swift/IDevice.xcframework
           cp ffi/idevice.h swift/include/idevice.h
           xcodebuild -create-xcframework \
