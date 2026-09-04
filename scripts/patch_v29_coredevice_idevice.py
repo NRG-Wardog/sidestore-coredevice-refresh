@@ -107,24 +107,8 @@ def patch_plist_array_free(root: Path) -> None:
 def patch_tunnel_provider(root: Path) -> None:
     path = root / "ffi" / "src" / "tunnel_provider.rs"
     text = path.read_text(encoding="utf-8")
-    if MARKER in text:
-        required = [
-            "HeartbeatClient::connect",
-            "tunnel_heartbeat_is_active",
-            ".min(1340)",
-            "TUNNEL_RSD_HANDSHAKE_PASS",
-        ]
-        missing = [item for item in required if item not in text]
-        if missing:
-            die(f"CoreDevice marker present but patch is incomplete: {missing}")
-        return
 
-    state = r'''
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::task::JoinHandle;
-
-#[cfg(target_os = "ios")]
+    legacy_logger = r'''#[cfg(target_os = "ios")]
 unsafe extern "C" {
     fn lockdown_diag_rust_log(message: *const std::ffi::c_char);
 }
@@ -139,7 +123,71 @@ fn transport_log(message: &str) {
 #[cfg(not(target_os = "ios"))]
 fn transport_log(message: &str) {
     tracing::debug!("{message}");
+}'''
+    owned_logger = r'''static TRANSPORT_LOG_CALLBACK: Mutex<
+    Option<unsafe extern "C" fn(*const std::ffi::c_char)>,
+> = Mutex::new(None);
+
+/// Registers the host application's transport logger. The callback must remain
+/// valid until it is replaced or cleared.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn idevice_set_transport_log_callback(
+    callback: Option<unsafe extern "C" fn(*const std::ffi::c_char)>,
+) {
+    *TRANSPORT_LOG_CALLBACK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = callback;
 }
+
+/// Rust owns this symbol because both idevice and its static jktcp dependency
+/// call it. Keeping it in the same archive prevents an unresolved cross-library
+/// reference when Swift package objects are linked later.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lockdown_diag_rust_log(message: *const std::ffi::c_char) {
+    if message.is_null() {
+        return;
+    }
+
+    let callback = *TRANSPORT_LOG_CALLBACK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(callback) = callback {
+        unsafe { callback(message) };
+    } else if let Ok(message) = unsafe { std::ffi::CStr::from_ptr(message) }.to_str() {
+        tracing::debug!("{message}");
+    }
+}
+
+fn transport_log(message: &str) {
+    if let Ok(message) = std::ffi::CString::new(message) {
+        unsafe { lockdown_diag_rust_log(message.as_ptr()) };
+    }
+}'''
+
+    if legacy_logger in text:
+        text = text.replace(legacy_logger, owned_logger, 1)
+        path.write_text(text, encoding="utf-8")
+
+    if MARKER in text:
+        required = [
+            "HeartbeatClient::connect",
+            "idevice_set_transport_log_callback",
+            "pub unsafe extern \"C\" fn lockdown_diag_rust_log",
+            "tunnel_heartbeat_is_active",
+            ".min(1340)",
+            "TUNNEL_RSD_HANDSHAKE_PASS",
+        ]
+        missing = [item for item in required if item not in text]
+        if missing:
+            die(f"CoreDevice marker present but patch is incomplete: {missing}")
+        return
+
+    state = r'''
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::task::JoinHandle;
+
+''' + owned_logger + r'''
 
 static ACTIVE_HEARTBEAT: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static HEARTBEAT_IS_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -351,6 +399,8 @@ def verify(root: Path) -> None:
         root / "ffi" / "src" / "tunnel_provider.rs": [
             MARKER,
             "HeartbeatClient::connect",
+            "idevice_set_transport_log_callback",
+            "pub unsafe extern \"C\" fn lockdown_diag_rust_log",
             "tunnel_heartbeat_is_active",
             ".min(1340)",
             "TUNNEL_RSD_HANDSHAKE_PASS",

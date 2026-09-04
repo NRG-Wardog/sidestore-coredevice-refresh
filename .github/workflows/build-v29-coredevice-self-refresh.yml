@@ -134,6 +134,11 @@ jobs:
           test -f ffi/idevice.h
           grep -Fq 'tunnel_create_usb' ffi/idevice.h
           grep -Fq 'tunnel_heartbeat_is_active' ffi/idevice.h
+          grep -Fq 'idevice_set_transport_log_callback' ffi/idevice.h
+          xcrun nm -arch arm64 -g target/aarch64-apple-ios/release/libidevice_ffi.a \
+            | grep -E '[[:space:]][Tt][[:space:]]_lockdown_diag_rust_log$'
+          xcrun nm -arch arm64 -g target/aarch64-apple-ios/release/libidevice_ffi.a \
+            | grep -E '[[:space:]][Tt][[:space:]]_idevice_set_transport_log_callback$'
           rm -rf swift/IDevice.xcframework
           cp ffi/idevice.h swift/include/idevice.h
           xcodebuild -create-xcframework \
@@ -161,6 +166,7 @@ jobs:
           swift package --package-path "$MUX/DeviceGateway" dump-package >/tmp/v29-gateway-package.json
 
           grep -Fq 'tunnel_create_usb(provider, &adapter, &handshake)' "$GATEWAY"
+          grep -Fq 'idevice_set_transport_log_callback(sideStoreTransportLog)' "$GATEWAY"
           grep -Fq 'withFFIDispatch(on: self.ffiQueue)' "$GATEWAY"
           grep -Fq 'idevice_plist_array_free(applications, UInt(count))' "$GATEWAY"
           grep -Fq 'CoreDevice heartbeat is maintained by Rust; poll its state without spinning.' \

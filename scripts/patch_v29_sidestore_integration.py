@@ -47,13 +47,26 @@ internal import MinimuxerCommon
         """import DeviceGatewayAPI
 internal import MinimuxerCommon
 
-@_cdecl("lockdown_diag_rust_log")
-func lockdownDiagRustLog(_ message: UnsafePointer<CChar>?) {
+func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
     guard let message else { return }
     debugLog(String(cString: message))
 }
 """,
         "Rust transport logger",
+    )
+
+    text = replace_once(
+        text,
+        """    public func setLogging(_ enabled: Bool) {
+        DeviceGatewayLogging.setLogging(enabled)
+        debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
+""",
+        """    public func setLogging(_ enabled: Bool) {
+        idevice_set_transport_log_callback(sideStoreTransportLog)
+        DeviceGatewayLogging.setLogging(enabled)
+        debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
+""",
+        "register Rust transport logger",
     )
 
     text = replace_once(
@@ -636,6 +649,7 @@ def verify_gateway(text: str) -> None:
     required = [
         MARKER,
         "coreDeviceProvider",
+        "idevice_set_transport_log_callback(sideStoreTransportLog)",
         "tunnel_create_usb(provider, &adapter, &handshake)",
         "tunnel_heartbeat_is_active()",
         "withFFIDispatch(on: self.ffiQueue)",
