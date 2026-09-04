@@ -8,6 +8,7 @@ on:
     paths:
       - 'LockdownDirectDiag/**'
       - 'scripts/patch_v28_quic_coredevice.py'
+      - 'scripts/jktcp_flush_cdtunnel.patch'
       - '.github/workflows/build-v28-quic.yml'
 
 jobs:
@@ -27,6 +28,13 @@ jobs:
           path: idevice
           submodules: recursive
 
+      - name: Checkout jktcp
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/jktcp
+          ref: e674e1eee6d5943e13b1eba0bd24a9dd0b2fa020
+          path: jktcp
+
       - name: Install Rust target for iOS
         run: |
           rustup target add aarch64-apple-ios
@@ -36,7 +44,12 @@ jobs:
 
       - name: Apply V28 QUIC CoreDevice Patch to idevice
         run: |
-          python3 builder/scripts/patch_v28_quic_coredevice.py idevice
+          git -C jktcp apply --check ../builder/scripts/jktcp_flush_cdtunnel.patch
+          git -C jktcp apply ../builder/scripts/jktcp_flush_cdtunnel.patch
+          python3 builder/scripts/patch_v28_quic_coredevice.py idevice jktcp
+
+      - name: Test patched jktcp
+        run: cargo test --manifest-path jktcp/Cargo.toml outbound_packets_flush_the_transport
 
       - name: Build idevice FFI for aarch64-apple-ios
         run: |

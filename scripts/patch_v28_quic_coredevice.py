@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Patch SideStore/idevice to support native on-device QUIC tunnel via Quinn + Rustls."""
 from pathlib import Path
+import os
 import sys
 
 def die(msg: str):
@@ -627,72 +628,27 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
             cdp_path.write_text(cdp_text, encoding="utf-8")
             print("Successfully hooked adapter_free to stop heartbeat")
 
-def patch_afc_file_runtime(root: Path) -> None:
-    """Keep AFC file descriptor futures on the runtime driving the RSD adapter.
-
-    AFC file descriptors borrow their parent client and are opened while
-    LOCAL_RUNTIME drives the userspace tunnel.  Running later descriptor
-    operations on GLOBAL_RUNTIME leaves the adapter's response path idle on
-    the other runtime, so the first AFC write can wait forever.
-    """
-    path = root / "ffi" / "src" / "afc.rs"
+def patch_jktcp_path_dependency(root: Path, jktcp_root: Path) -> None:
+    """Build against the audited jktcp checkout patched by this workflow."""
+    path = root / "idevice" / "Cargo.toml"
     if not path.exists():
-        die(f"afc.rs not found at {path}")
+        die(f"idevice/Cargo.toml not found at {path}")
+    if not (jktcp_root / "src" / "adapter.rs").exists():
+        die(f"jktcp checkout not found at {jktcp_root}")
+
     text = path.read_text(encoding="utf-8")
-    marker = "// V28: AFC file descriptor operations use LOCAL_RUNTIME"
-    if marker in text:
-        print("ffi/src/afc.rs already uses LOCAL_RUNTIME for file descriptors")
-        return
-
-    replacements = [
-        (
-            "    let res: Result<(), IdeviceError> = run_sync(async move { fd.close().await });",
-            "    // V28: AFC file descriptor operations use LOCAL_RUNTIME\n"
-            "    let res: Result<(), IdeviceError> = run_sync_local(async move { fd.close().await });",
-            "AFC file close runtime",
-        ),
-        (
-            "    let res: Result<Vec<u8>, IdeviceError> = run_sync({",
-            "    let res: Result<Vec<u8>, IdeviceError> = run_sync_local({",
-            "AFC file read runtime",
-        ),
-        (
-            "    let res: Result<Vec<u8>, IdeviceError> = run_sync(async move { fd.read_entire().await });",
-            "    let res: Result<Vec<u8>, IdeviceError> = run_sync_local(async move { fd.read_entire().await });",
-            "AFC file read-entire runtime",
-        ),
-        (
-            "    let res: Result<u64, IdeviceError> = run_sync(async move { Ok(fd.seek(seek_from).await?) });",
-            "    let res: Result<u64, IdeviceError> = run_sync_local(async move { Ok(fd.seek(seek_from).await?) });",
-            "AFC file seek runtime",
-        ),
-        (
-            "        run_sync(async { Ok(fd.seek(SeekFrom::Current(0)).await?) });",
-            "        run_sync_local(async { Ok(fd.seek(SeekFrom::Current(0)).await?) });",
-            "AFC file tell runtime",
-        ),
-        (
-            "    let res: Result<(), IdeviceError> = run_sync(async move { fd.write_entire(data_slice).await });",
-            "    let res: Result<(), IdeviceError> = run_sync_local(async move { fd.write_entire(data_slice).await });",
-            "AFC file write runtime",
-        ),
-    ]
-
-    for anchor, replacement, label in replacements:
-        text = once(text, anchor, replacement, label)
-    text = once(
-        text,
-        "    run_sync, run_sync_local,\n",
-        "    run_sync_local,\n",
-        "remove unused global AFC runtime import",
-    )
+    old = 'jktcp = { git = "https://github.com/SideStore/jktcp", branch = "master", optional = true, default-features = false }'
+    relative = os.path.relpath(jktcp_root, path.parent).replace("\\", "/")
+    new = f'jktcp = {{ path = "{relative}", optional = true, default-features = false }}'
+    text = once(text, old, new, "pinned local jktcp dependency")
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched AFC file descriptor operations onto LOCAL_RUNTIME")
+    print(f"Successfully pinned idevice to patched jktcp checkout at {relative}")
 
 def main():
-    if len(sys.argv) < 2:
-        die("Usage: patch_v28_quic_coredevice.py <idevice-repo-root>")
+    if len(sys.argv) != 3:
+        die("Usage: patch_v28_quic_coredevice.py <idevice-repo-root> <jktcp-repo-root>")
     root = Path(sys.argv[1]).resolve()
+    jktcp_root = Path(sys.argv[2]).resolve()
     if not root.is_dir():
         die(f"Directory does not exist: {root}")
     patch_remote_pairing_mod(root)
@@ -701,7 +657,7 @@ def main():
     patch_idevice_h(root)
     patch_cdtunnel_atomic_write(root)
     patch_tunnel_usb_heartbeat(root)
-    patch_afc_file_runtime(root)
+    patch_jktcp_path_dependency(root, jktcp_root)
     print("ALL V28 QUIC COREDEVICE PATCHES APPLIED SUCCESSFULLY!")
 
 if __name__ == '__main__':
