@@ -542,7 +542,18 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
 '''
 
     old_tunnel = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
-        let proxy = CoreDeviceProxy::connect(provider_ref).await?;'''
+        let proxy = CoreDeviceProxy::connect(provider_ref).await?;
+        let rsd_port = proxy.tunnel_info().server_rsd_port;
+        let adapter = proxy
+            .create_software_tunnel()
+            .map_err(|e| IdeviceError::InternalError(format!("{e}")))?;
+        let mut adapter = adapter.to_async_handle();
+        let rsd_stream = adapter
+            .connect(rsd_port)
+            .await
+            .map_err(|e| IdeviceError::InternalError(format!("{e}")))?;
+        let handshake = RsdHandshake::new(rsd_stream).await?;
+        Ok::<_, IdeviceError>((adapter, handshake))'''
 
     new_tunnel = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
 
@@ -600,7 +611,88 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
 
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
-        let proxy = CoreDeviceProxy::connect(provider_ref).await?;'''
+        diag_log("[LOCKDOWN_DIAG] TUNNEL_COREDEVICE_CONNECT_START");
+        let proxy = match tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            CoreDeviceProxy::connect(provider_ref),
+        ).await {
+            Ok(Ok(proxy)) => {
+                diag_log("[LOCKDOWN_DIAG] TUNNEL_COREDEVICE_CONNECT_PASS");
+                proxy
+            }
+            Ok(Err(e)) => {
+                diag_log(&format!("[LOCKDOWN_DIAG] TUNNEL_COREDEVICE_CONNECT_FAIL: {e}"));
+                unsafe { tunnel_heartbeat_stop() };
+                return Err(e);
+            }
+            Err(_) => {
+                diag_log("[LOCKDOWN_DIAG] TUNNEL_COREDEVICE_CONNECT_TIMEOUT elapsed_ms=20000");
+                unsafe { tunnel_heartbeat_stop() };
+                return Err(IdeviceError::InternalError(
+                    "CoreDeviceProxy connect timed out after 20 seconds".into(),
+                ));
+            }
+        };
+        let rsd_port = proxy.tunnel_info().server_rsd_port;
+
+        diag_log("[LOCKDOWN_DIAG] TUNNEL_ADAPTER_CREATE_START");
+        let adapter = match proxy.create_software_tunnel() {
+            Ok(adapter) => adapter,
+            Err(e) => {
+                diag_log(&format!("[LOCKDOWN_DIAG] TUNNEL_ADAPTER_CREATE_FAIL: {e}"));
+                unsafe { tunnel_heartbeat_stop() };
+                return Err(IdeviceError::InternalError(format!("software tunnel: {e}")));
+            }
+        };
+        diag_log("[LOCKDOWN_DIAG] TUNNEL_ADAPTER_CREATE_PASS");
+        let mut adapter = adapter.to_async_handle();
+
+        diag_log("[LOCKDOWN_DIAG] TUNNEL_RSD_CONNECT_START");
+        let rsd_stream = match tokio::time::timeout(
+            std::time::Duration::from_secs(12),
+            adapter.connect(rsd_port),
+        ).await {
+            Ok(Ok(stream)) => {
+                diag_log("[LOCKDOWN_DIAG] TUNNEL_RSD_CONNECT_PASS");
+                stream
+            }
+            Ok(Err(e)) => {
+                diag_log(&format!("[LOCKDOWN_DIAG] TUNNEL_RSD_CONNECT_FAIL: {e}"));
+                unsafe { tunnel_heartbeat_stop() };
+                return Err(IdeviceError::InternalError(format!("RSD connect: {e}")));
+            }
+            Err(_) => {
+                diag_log("[LOCKDOWN_DIAG] TUNNEL_RSD_CONNECT_TIMEOUT elapsed_ms=12000");
+                unsafe { tunnel_heartbeat_stop() };
+                return Err(IdeviceError::InternalError(
+                    "RSD connect timed out after 12 seconds".into(),
+                ));
+            }
+        };
+
+        diag_log("[LOCKDOWN_DIAG] TUNNEL_RSD_HANDSHAKE_START");
+        let handshake = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            RsdHandshake::new(rsd_stream),
+        ).await {
+            Ok(Ok(handshake)) => {
+                diag_log("[LOCKDOWN_DIAG] TUNNEL_RSD_HANDSHAKE_PASS");
+                handshake
+            }
+            Ok(Err(e)) => {
+                diag_log(&format!("[LOCKDOWN_DIAG] TUNNEL_RSD_HANDSHAKE_FAIL: {e}"));
+                unsafe { tunnel_heartbeat_stop() };
+                return Err(e);
+            }
+            Err(_) => {
+                diag_log("[LOCKDOWN_DIAG] TUNNEL_RSD_HANDSHAKE_TIMEOUT elapsed_ms=15000");
+                unsafe { tunnel_heartbeat_stop() };
+                return Err(IdeviceError::InternalError(
+                    "RSD handshake timed out after 15 seconds".into(),
+                ));
+            }
+        };
+        Ok::<_, IdeviceError>((adapter, handshake))'''
 
     text = once(
         text,

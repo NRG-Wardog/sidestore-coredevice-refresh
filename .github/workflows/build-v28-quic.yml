@@ -8,7 +8,7 @@ on:
     paths:
       - 'LockdownDirectDiag/**'
       - 'scripts/patch_v28_quic_coredevice.py'
-      - 'scripts/jktcp_flush_cdtunnel.patch'
+      - 'scripts/patch_jktcp_reliability.py'
       - '.github/workflows/build-v28-quic.yml'
 
 jobs:
@@ -44,12 +44,11 @@ jobs:
 
       - name: Apply V28 QUIC CoreDevice Patch to idevice
         run: |
-          git -C jktcp apply --check ../builder/scripts/jktcp_flush_cdtunnel.patch
-          git -C jktcp apply ../builder/scripts/jktcp_flush_cdtunnel.patch
+          python3 builder/scripts/patch_jktcp_reliability.py jktcp
           python3 builder/scripts/patch_v28_quic_coredevice.py idevice jktcp
 
       - name: Test patched jktcp
-        run: cargo test --manifest-path jktcp/Cargo.toml outbound_packets_flush_the_transport
+        run: cargo test --manifest-path jktcp/Cargo.toml
 
       - name: Build idevice FFI for aarch64-apple-ios
         run: |
