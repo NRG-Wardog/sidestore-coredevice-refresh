@@ -1,0 +1,268 @@
+name: Build V29 CoreDevice Self Refresh
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidestore-v29-coredevice-self-refresh
+  cancel-in-progress: false
+
+env:
+  SIDESTORE_REF: 394bb4eb331cb4afc23517af2fc847ec103af57f
+  MINIMUXER_REF: e0de126ec6773c02afe7d965def86ddffd79cbeb
+  IDEVICE_REF: ebd7dadfc55d1c4facee3d11ecf5b28e20548b57
+  JKTCP_REF: e674e1eee6d5943e13b1eba0bd24a9dd0b2fa020
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+          fetch-depth: 1
+
+      - name: Checkout pinned SideStore
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/SideStore
+          ref: ${{ env.SIDESTORE_REF }}
+          path: work/SideStore
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Checkout pinned idevice
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/idevice
+          ref: ${{ env.IDEVICE_REF }}
+          path: idevice
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Checkout pinned jktcp
+        uses: actions/checkout@v4
+        with:
+          repository: SideStore/jktcp
+          ref: ${{ env.JKTCP_REF }}
+          path: jktcp
+          fetch-depth: 1
+
+      - name: Verify exact source revisions
+        run: |
+          set -euo pipefail
+          test "$(git -C work/SideStore rev-parse HEAD)" = "$SIDESTORE_REF"
+          test "$(git -C work/SideStore/Dependencies/minimuxer rev-parse HEAD)" = "$MINIMUXER_REF"
+          test "$(git -C idevice rev-parse HEAD)" = "$IDEVICE_REF"
+          test "$(git -C jktcp rev-parse HEAD)" = "$JKTCP_REF"
+          python3 -m py_compile \
+            builder/scripts/patch_jktcp_reliability.py \
+            builder/scripts/patch_v29_coredevice_idevice.py \
+            builder/scripts/patch_v29_sidestore_integration.py \
+            builder/scripts/patch_v22_local_idevice_package.py
+
+      - name: Select Xcode 26.4
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
+      - name: Restore build caches
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/bindgen
+            idevice/target
+            jktcp/target
+            ~/Library/Caches/org.swift.swiftpm
+          key: sidestore-v29-${{ runner.os }}-${{ env.IDEVICE_REF }}-${{ env.JKTCP_REF }}-${{ env.MINIMUXER_REF }}
+          restore-keys: |
+            sidestore-v28-
+            sidestore-v27-
+            sidestore-
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          if ! command -v ldid >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install ldid; fi
+          if ! command -v bindgen >/dev/null 2>&1; then cargo install --locked bindgen-cli --version 0.72.1; fi
+          rustup target add aarch64-apple-ios
+
+      - name: Apply focused CoreDevice transport patches
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/patch_jktcp_reliability.py jktcp
+          python3 builder/scripts/patch_v29_coredevice_idevice.py idevice jktcp
+
+          ! grep -R -E 'rppairing_connect_quic|create_quic_listener|quinn::' \
+            idevice/ffi/src/tunnel_provider.rs \
+            idevice/idevice/src/tunnel.rs
+          grep -Fq 'packet.extend_from_slice(CDTUNNEL_MAGIC)' idevice/idevice/src/tunnel.rs
+          grep -Fq 'effective_mss = negotiated_mtu.saturating_sub(60).min(1340)' idevice/ffi/src/tunnel_provider.rs
+          grep -Fq 'HeartbeatClient::connect' idevice/ffi/src/tunnel_provider.rs
+          grep -Fq 'run_sync_local(async move { fd.write_entire(data_slice).await })' idevice/ffi/src/afc.rs
+          grep -Fq 'let data = unsafe { Box::from_raw(slice) };' idevice/ffi/src/lib.rs
+
+      - name: Test patched transport sources
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path jktcp/Cargo.toml
+          cargo fmt --manifest-path idevice/ffi/Cargo.toml
+          git -C jktcp diff --check
+          git -C idevice diff --check
+          cargo test --manifest-path jktcp/Cargo.toml --lib -- \
+            --skip tests::local_tcp \
+            --skip tests::handle_speed
+          cargo check --manifest-path idevice/ffi/Cargo.toml --features obfuscate
+
+      - name: Build idevice for iOS
+        working-directory: idevice
+        run: |
+          set -euo pipefail
+          BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)" \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            cargo build --release --target aarch64-apple-ios \
+              --features obfuscate --manifest-path ffi/Cargo.toml
+
+          test -f target/aarch64-apple-ios/release/libidevice_ffi.a
+          test -f ffi/idevice.h
+          grep -Fq 'tunnel_create_usb' ffi/idevice.h
+          grep -Fq 'tunnel_heartbeat_is_active' ffi/idevice.h
+          rm -rf swift/IDevice.xcframework
+          cp ffi/idevice.h swift/include/idevice.h
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libidevice_ffi.a \
+            -headers swift/include \
+            -output swift/IDevice.xcframework
+
+      - name: Patch SideStore and inject idevice
+        run: |
+          set -euo pipefail
+          SIDE=work/SideStore
+          MUX="$SIDE/Dependencies/minimuxer"
+          mkdir -p "$MUX/DeviceGateway/LocalBinary"
+          rm -rf "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
+          cp -R idevice/swift/IDevice.xcframework "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
+
+          python3 builder/scripts/patch_v29_sidestore_integration.py "$MUX" "$SIDE"
+          python3 builder/scripts/patch_v22_local_idevice_package.py "$MUX"
+
+          GATEWAY="$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
+          swiftc -frontend -parse "$GATEWAY"
+          swiftc -frontend -parse "$MUX/Sources/Services/HeartbeatService.swift"
+          swiftc -frontend -parse "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
+          swiftc -frontend -parse "$SIDE/AltStore/AppDelegate.swift"
+          swift package --package-path "$MUX/DeviceGateway" dump-package >/tmp/v29-gateway-package.json
+
+          grep -Fq 'tunnel_create_usb(provider, &adapter, &handshake)' "$GATEWAY"
+          grep -Fq 'withFFIDispatch(on: self.ffiQueue)' "$GATEWAY"
+          grep -Fq 'idevice_plist_array_free(applications, count)' "$GATEWAY"
+          grep -Fq 'CoreDevice heartbeat is maintained by Rust; poll its state without spinning.' \
+            "$MUX/Sources/Services/HeartbeatService.swift"
+          grep -Fq 'SIDESTORE_SIGN_PASS' "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
+          grep -Fq 'SELF_REFRESH_COMPLETE' "$SIDE/AltStore/AppDelegate.swift"
+          ! grep -Fq 'free(outResult)' "$GATEWAY"
+
+      - name: Resolve Swift packages
+        working-directory: work/SideStore
+        run: |
+          set -euo pipefail
+          artifact="$HOME/Library/Caches/org.swift.swiftpm/artifacts/https___github_com_krzyzanowskim_OpenSSL_releases_download_3_6_2000_OpenSSL_xcframework_zip"
+          ok=0
+          for attempt in 1 2 3; do
+            rm -rf "$artifact"
+            rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*/SourcePackages/artifacts/openssl 2>/dev/null || true
+            if xcodebuild -resolvePackageDependencies -disablePackageRepositoryCache \
+                -project AltStore.xcodeproj -scheme SideStore; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" -eq 1
+
+      - name: Build SideStore once
+        working-directory: work/SideStore
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs
+          plutil -replace CFBundleDisplayName -string SideStore AltStore/Info.plist \
+            || plutil -insert CFBundleDisplayName -string SideStore AltStore/Info.plist
+          NSUnbufferedIO=YES make -B build 2>&1 | tee build/logs/build.log
+          make fakesign 2>&1 | tee -a build/logs/build.log
+          make ipa 2>&1 | tee -a build/logs/build.log
+
+      - name: Verify V29 IPA
+        run: |
+          set -euo pipefail
+          IPA=work/SideStore/SideStore.ipa
+          test -f "$IPA"
+          unzip -t "$IPA" >/tmp/v29-unzip-test.txt
+          rm -rf /tmp/v29-ipa
+          mkdir -p /tmp/v29-ipa
+          unzip -q "$IPA" -d /tmp/v29-ipa
+          test -f /tmp/v29-ipa/Payload/SideStore.app/SideStore
+          test "$(plutil -extract CFBundleDisplayName raw /tmp/v29-ipa/Payload/SideStore.app/Info.plist)" = "SideStore"
+
+          find /tmp/v29-ipa/Payload/SideStore.app -type f -size +32k -print0 \
+            | xargs -0 strings >/tmp/v29-strings.txt
+          for marker in \
+            '[SIDESTORE_COREDEVICE] TRANSPORT_CREATE_PASS' \
+            '[SIDESTORE_COREDEVICE] JKTCP_MSS_CONFIG' \
+            '[SELF_REFRESH] SIDESTORE_SIGN_PASS' \
+            '[SELF_REFRESH] SIDESTORE_STAGE_PASS' \
+            '[SELF_REFRESH] SIDESTORE_INSTALL_REQUEST_PASS' \
+            '[SELF_REFRESH] SIDESTORE_INSTALL_COMPLETE' \
+            '[SELF_REFRESH] SIDESTORE_POST_INSTALL_VERIFY_PASS' \
+            '[SELF_REFRESH] SELF_REFRESH_COMPLETE'; do
+            grep -Fq "$marker" /tmp/v29-strings.txt
+          done
+          ! grep -E 'rppairing_connect_quic|create_quic_listener|RP-QUIC' /tmp/v29-strings.txt
+
+          SHA="$(shasum -a 256 "$IPA" | awk '{print $1}')"
+          SIZE="$(stat -f '%z' "$IPA")"
+          {
+            echo 'SideStore V29 CoreDevice Self Refresh'
+            echo "builder_commit=$GITHUB_SHA"
+            echo "sidestore_ref=$SIDESTORE_REF"
+            echo "minimuxer_ref=$MINIMUXER_REF"
+            echo "idevice_ref=$IDEVICE_REF"
+            echo "jktcp_ref=$JKTCP_REF"
+            echo "ipa_size=$SIZE"
+            echo "ipa_sha256=$SHA"
+            echo 'transport=lockdown-coredevice-cdtunnel-rsd'
+            echo 'quic=false'
+            echo 'verification=PASS'
+          } | tee /tmp/v29-verification.txt
+
+      - name: Upload V29 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v29-coredevice-self-refresh
+          path: |
+            work/SideStore/SideStore.ipa
+            /tmp/v29-verification.txt
+            /tmp/v29-unzip-test.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SideStore-v29-failure-diagnostics
+          path: |
+            work/SideStore/build/logs
+            /tmp/v29-gateway-package.json
+            /tmp/v29-strings.txt
+            /tmp/v29-unzip-test.txt
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 3
