@@ -6,5 +6,9 @@ test_idevice/
 temp_isideload/
 test_extract/
 v25_artifact/
+v26_artifact/
+v27_artifact/
+v28_*
+scratch/
 __pycache__/
 *.pyc

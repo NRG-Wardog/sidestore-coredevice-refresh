@@ -30,7 +30,7 @@ jobs:
             -framework Foundation -framework UIKit -framework Security -framework Network \
             -I. -L. -lidevice_ffi \
             -o LockdownDirectDiag \
-            main.m AppDelegate.m ViewController.m
+            main.m AppDelegate.m ViewController.m LocalTunnelEndpointResolver.m
 
       - name: Package Payload and Sign
         run: |
@@ -39,6 +39,7 @@ jobs:
           cp LockdownDirectDiag Payload/LockdownDirectDiag.app/
           cp Info.plist Payload/LockdownDirectDiag.app/
           cp pairingFile.plist Payload/LockdownDirectDiag.app/
+          cp rppairing.plist Payload/LockdownDirectDiag.app/
           cp client.p12 Payload/LockdownDirectDiag.app/
           cp client_pub.b64 Payload/LockdownDirectDiag.app/
           
