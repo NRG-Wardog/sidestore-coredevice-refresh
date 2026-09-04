@@ -633,10 +633,11 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
                 ));
             }
         };
+        let tunnel_mtu = proxy.tunnel_info().mtu as usize;
         let rsd_port = proxy.tunnel_info().server_rsd_port;
 
         diag_log("[LOCKDOWN_DIAG] TUNNEL_ADAPTER_CREATE_START");
-        let adapter = match proxy.create_software_tunnel() {
+        let mut adapter = match proxy.create_software_tunnel() {
             Ok(adapter) => adapter,
             Err(e) => {
                 diag_log(&format!("[LOCKDOWN_DIAG] TUNNEL_ADAPTER_CREATE_FAIL: {e}"));
@@ -644,6 +645,15 @@ pub unsafe extern "C" fn tunnel_heartbeat_stop() {
                 return Err(IdeviceError::InternalError(format!("software tunnel: {e}")));
             }
         };
+        // CoreDeviceProxy negotiates a 16 KB receive MTU, but host-to-device
+        // IPv6 packets above 8 KB are dropped on Apple devices. jktcp has no
+        // PLPMTUD, so use the cross-device-safe seed used by pymobiledevice3.
+        let effective_mss = tunnel_mtu.saturating_sub(60).min(1340);
+        adapter.set_mss(effective_mss);
+        diag_log(&format!(
+            "[LOCKDOWN_DIAG] JKTCP_MSS_CONFIG negotiated_mtu={} effective_mss={}",
+            tunnel_mtu, effective_mss
+        ));
         diag_log("[LOCKDOWN_DIAG] TUNNEL_ADAPTER_CREATE_PASS");
         let mut adapter = adapter.to_async_handle();
 
