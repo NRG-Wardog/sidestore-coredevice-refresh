@@ -505,37 +505,113 @@ def patch_tunnel_usb_heartbeat(root: Path) -> None:
         print("tunnel_provider.rs already has HeartbeatClient keep-alive")
         return
 
-    old = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
+    # Add Heartbeat lifecycle state and C FFI exports to tunnel_provider.rs
+    hb_state = '''
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::task::JoinHandle;
+
+static ACTIVE_HEARTBEAT: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+static HEARTBEAT_IS_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tunnel_heartbeat_is_active() -> bool {
+    HEARTBEAT_IS_ACTIVE.load(Ordering::SeqCst)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tunnel_heartbeat_stop() {
+    let mut lock = ACTIVE_HEARTBEAT.lock().unwrap();
+    if let Some(handle) = lock.take() {
+        handle.abort();
+        HEARTBEAT_IS_ACTIVE.store(false, Ordering::SeqCst);
+        eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_STOPPED_CLEANLY");
+    }
+}
+'''
+
+    old_tunnel = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
         let proxy = CoreDeviceProxy::connect(provider_ref).await?;'''
 
-    new = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
+    new_tunnel = '''        let provider_ref: &dyn IdeviceProvider = unsafe { &*(*lockdown_provider).0 };
+
+        // Ensure any previous heartbeat loop is cleanly stopped before starting a new one
+        {
+            let mut lock = ACTIVE_HEARTBEAT.lock().unwrap();
+            if let Some(prev) = lock.take() {
+                prev.abort();
+                eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_STOPPED_CLEANLY");
+            }
+            HEARTBEAT_IS_ACTIVE.store(false, Ordering::SeqCst);
+        }
 
         // For network / reflected utun connections, iOS remotepairingdeviced requires an active
         // com.apple.mobile.heartbeat connection; otherwise heartbeatd deallocates the watcher and
         // drops the tunnel connection within 88ms.
         use idevice::heartbeat::HeartbeatClient;
-        if let Ok(mut hb) = HeartbeatClient::connect(provider_ref).await {
-            tracing::info!("[HEARTBEAT] com.apple.mobile.heartbeat connected, starting keep-alive loop");
-            tokio::spawn(async move {
-                loop {
-                    match hb.get_marco(60).await {
-                        Ok(_) => {
-                            if hb.send_polo().await.is_err() {
-                                break;
-                            }
+        let mut hb = match HeartbeatClient::connect(provider_ref).await {
+            Ok(hb) => {
+                eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_CONNECT_PASS");
+                hb
+            }
+            Err(e) => {
+                eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_CONNECT_FAIL: {e}");
+                return Err(IdeviceError::InternalError(format!("Heartbeat connection required but failed: {e}")));
+            }
+        };
+
+        HEARTBEAT_IS_ACTIVE.store(true, Ordering::SeqCst);
+        let hb_task = tokio::spawn(async move {
+            loop {
+                match hb.get_marco(60).await {
+                    Ok(_) => {
+                        eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_MARCO_RECEIVED");
+                        if hb.send_polo().await.is_ok() {
+                            eprintln!("[LOCKDOWN_DIAG] HEARTBEAT_POLO_SENT");
+                        } else {
+                            break;
                         }
-                        Err(_) => break,
                     }
+                    Err(_) => break,
                 }
-            });
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            }
+            HEARTBEAT_IS_ACTIVE.store(false, Ordering::SeqCst);
+        });
+
+        {
+            let mut lock = ACTIVE_HEARTBEAT.lock().unwrap();
+            *lock = Some(hb_task);
         }
+
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
         let proxy = CoreDeviceProxy::connect(provider_ref).await?;'''
 
-    text = once(text, old, new, "tunnel_create_usb heartbeat keep-alive in tunnel_provider.rs")
+    text = once(
+        text,
+        "use crate::{IdeviceFfiError, ffi_err, provider::IdeviceProviderHandle, run_sync_local};",
+        "use crate::{IdeviceFfiError, ffi_err, provider::IdeviceProviderHandle, run_sync_local};\n" + hb_state,
+        "hb_state insertion in tunnel_provider.rs"
+    )
+    text = once(text, old_tunnel, new_tunnel, "tunnel_create_usb heartbeat keep-alive in tunnel_provider.rs")
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched tunnel_create_usb with HeartbeatClient keep-alive loop")
+    print("Successfully patched tunnel_create_usb with hardened HeartbeatClient keep-alive loop")
+
+    # Also patch adapter_free in core_device_proxy.rs to stop heartbeat when adapter is freed
+    cdp_path = root / "ffi" / "src" / "core_device_proxy.rs"
+    if cdp_path.exists():
+        cdp_text = cdp_path.read_text(encoding="utf-8")
+        if "tunnel_heartbeat_stop" not in cdp_text:
+            old_free = '''pub unsafe extern "C" fn adapter_free(handle: *mut AdapterHandle) {
+    if !handle.is_null() {
+        tracing::debug!("Freeing adapter");'''
+            new_free = '''pub unsafe extern "C" fn adapter_free(handle: *mut AdapterHandle) {
+    if !handle.is_null() {
+        tracing::debug!("Freeing adapter");
+        crate::tunnel_provider::tunnel_heartbeat_stop();'''
+            cdp_text = once(cdp_text, old_free, new_free, "adapter_free hook for heartbeat cleanup")
+            cdp_path.write_text(cdp_text, encoding="utf-8")
+            print("Successfully hooked adapter_free to stop heartbeat")
 
 def main():
     if len(sys.argv) < 2:
