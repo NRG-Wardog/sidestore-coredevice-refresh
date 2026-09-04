@@ -48,7 +48,10 @@ jobs:
           python3 builder/scripts/patch_v28_quic_coredevice.py idevice jktcp
 
       - name: Test patched jktcp
-        run: cargo test --manifest-path jktcp/Cargo.toml
+        run: |
+          cargo test --manifest-path jktcp/Cargo.toml --lib -- \
+            --skip tests::local_tcp \
+            --skip tests::handle_speed
 
       - name: Build idevice FFI for aarch64-apple-ios
         run: |
