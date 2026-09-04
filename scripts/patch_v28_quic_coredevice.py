@@ -471,28 +471,30 @@ struct IdeviceFfiError *rppairing_connect_quic_tunnel(const idevice_sockaddr *ad
     path.write_text(text, encoding="utf-8")
     print("Successfully patched ffi/idevice.h with rppairing_connect_quic_tunnel declaration")
 
-def patch_coredevice_proxy_nossl(root: Path) -> None:
-    path = root / "idevice" / "src" / "lib.rs"
+def patch_cdtunnel_atomic_write(root: Path) -> None:
+    path = root / "idevice" / "src" / "tunnel.rs"
     if not path.exists():
-        die(f"idevice/src/lib.rs not found at {path}")
+        die(f"idevice/src/tunnel.rs not found at {path}")
     text = path.read_text(encoding="utf-8")
-    if 'Self::service_name() != "com.apple.internal.devicecompute.CoreDeviceProxy"' in text:
-        print("idevice/src/lib.rs already has CoreDeviceProxy raw CDTunnel fix")
+    if 'packet.extend_from_slice(CDTUNNEL_MAGIC);' in text:
+        print("idevice/src/tunnel.rs already has atomic CDTunnel packet write")
         return
 
-    old = '''        if ssl {
-            idevice
-                .start_session(&provider.get_pairing_file().await?, legacy)
-                .await?;
-        }'''
-    new = '''        if ssl && Self::service_name() != "com.apple.internal.devicecompute.CoreDeviceProxy" {
-            idevice
-                .start_session(&provider.get_pairing_file().await?, legacy)
-                .await?;
-        }'''
-    text = once(text, old, new, "disable SSL on CoreDeviceProxy service in lib.rs")
+    old = '''        stream.write_all(CDTUNNEL_MAGIC).await?;
+        stream.write_all(&(body.len() as u16).to_be_bytes()).await?;
+        stream.write_all(&body).await?;
+        stream.flush().await?;'''
+
+    new = '''        let mut packet = Vec::with_capacity(CDTUNNEL_MAGIC.len() + 2 + body.len());
+        packet.extend_from_slice(CDTUNNEL_MAGIC);
+        packet.extend_from_slice(&(body.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&body);
+        stream.write_all(&packet).await?;
+        stream.flush().await?;'''
+
+    text = once(text, old, new, "atomic CDTunnel write in tunnel.rs")
     path.write_text(text, encoding="utf-8")
-    print("Successfully patched idevice/src/lib.rs to preserve raw CDTunnel on CoreDeviceProxy")
+    print("Successfully patched idevice/src/tunnel.rs with single TLS record write for CDTunnel")
 
 def main():
     if len(sys.argv) < 2:
@@ -504,7 +506,7 @@ def main():
     patch_ffi_cargo_toml(root)
     patch_tunnel_provider(root)
     patch_idevice_h(root)
-    patch_coredevice_proxy_nossl(root)
+    patch_cdtunnel_atomic_write(root)
     print("ALL V28 QUIC COREDEVICE PATCHES APPLIED SUCCESSFULLY!")
 
 if __name__ == '__main__':
