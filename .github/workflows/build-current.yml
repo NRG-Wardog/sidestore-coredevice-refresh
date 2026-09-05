@@ -1,4 +1,4 @@
-name: Build V30 Background Automation
+name: Build Current SideStore
 
 on:
   workflow_dispatch:

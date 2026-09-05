@@ -1,5 +1,7 @@
 # SideStore CoreDevice Self-Refresh Builder
 
+[![Build Current SideStore](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/workflows/build-current.yml/badge.svg)](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/workflows/build-current.yml)
+
 This repository builds a modified SideStore that can refresh and install apps
 over the same iPhone's official App Store LocalDevVPN connection. The final
 runtime does not require a PC, USB, relay server, jailbreak, paid Apple
