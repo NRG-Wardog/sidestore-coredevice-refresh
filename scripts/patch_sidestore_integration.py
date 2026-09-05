@@ -632,7 +632,7 @@ func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
         for index in 0..<count {
             guard let application = applications[index] else { continue }
             if let identifierNode = plist_dict_get_item(application, "CFBundleIdentifier") {
-                let identifier = getRustPlistString(identifierNode)
+                guard let identifier = getRustPlistString(identifierNode) else { continue }
                 if identifier == bundleId {
                     matchedIdentifier = identifier
                     if let versionNode = plist_dict_get_item(application, "CFBundleShortVersionString") {
