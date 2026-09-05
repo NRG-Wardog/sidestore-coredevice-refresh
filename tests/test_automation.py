@@ -16,6 +16,7 @@ SWIFTC = os.environ.get("SWIFTC") or shutil.which("swiftc")
 SOURCE = Path(os.environ.get("SIDESTORE_TEST_SOURCE", ROOT.parent / "SideStore-source-timepicker"))
 REF = "394bb4eb331cb4afc23517af2fc847ec103af57f"
 FILES = ["AltStore/AppDelegate.swift", "AltStore/SceneDelegate.swift",
+         "AltStore/Managing Apps/AppManager.swift",
          "AltStore/Info.plist", "AltStore/Settings/SettingsViewController.swift",
          "SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift"]
 
@@ -131,13 +132,22 @@ print("Schedule date tests passed")
                 target.write_bytes(contents)
             functions = [automation.patch_app_delegate, automation.patch_scene_delegate,
                          automation.patch_background_operation, automation.patch_info_plist,
-                         automation.patch_settings, automation.verify]
+                         automation.patch_settings, automation.patch_manual_refresh, automation.verify]
             for patch in functions:
                 patch(root)
             first = {name: (root / name).read_bytes() for name in FILES}
             for patch in functions:
                 patch(root)
             self.assertEqual(first, {name: (root / name).read_bytes() for name in FILES})
+            manager = (root / "AltStore/Managing Apps/AppManager.swift").read_text()
+            section = manager[manager.index("    func refresh(_ installedApps:"):manager.index("    func activate(")]
+            self.assertIn("recordManualHistory: Bool = true", section)
+            self.assertLess(section.index("try await self.pipelineRunner.perform"),
+                            section.index("AutomaticRefreshHistory.finishManual"))
+            self.assertIn("results: actualGroup.results", section)
+            self.assertIn("AutomaticRefreshHistory.record(.failed", section)
+            background = (root / FILES[-1]).read_text()
+            self.assertIn("recordManualHistory: false", background)
             if SWIFTC:
                 for name in FILES:
                     if name.endswith(".swift"):
@@ -146,8 +156,114 @@ print("Schedule date tests passed")
                         self.assertEqual(result.returncode, 0, result.stderr)
                 self.check_scheduler(root)
                 self.check_history_and_lifecycle(root)
+                self.check_manual_refresh_entry(root, section)
                 if platform.system() == "Darwin":
                     self.check_swiftui(root)
+
+    def check_manual_refresh_entry(self, root, section):
+        path = root / "manual-entry.swift"
+        path.write_text("import Foundation\n" + automation.SCHEDULE_MODEL + r'''
+func debugLog(_ message: String) {}
+class UIViewController {}
+class InstalledApp { let bundleIdentifier = "test.app" }
+class Context { var error: Error? }
+class RefreshGroup {
+    let context: Context
+    var results = [String: Result<InstalledApp, Error>]()
+    var activeTask: Task<Void, Never>?
+    var completionHandler: (([String: Result<InstalledApp, Error>]) -> Void)?
+    init(context: Context) { self.context = context }
+}
+enum Operation { case refresh(InstalledApp) }
+class Runner {
+    var shouldThrow = false
+    var shouldFail = false
+    func perform(_ operations: [Operation], handler: Int, group: RefreshGroup) async throws {
+        if shouldThrow { throw NSError(domain: "test", code: 1) }
+        for case .refresh(let app) in operations {
+            group.results[app.bundleIdentifier] = shouldFail ? .failure(NSError(domain: "test", code: 2)) : .success(app)
+        }
+        group.completionHandler?(group.results)
+    }
+}
+class Manager {
+    let pipelineRunner = Runner()
+    func makePipelineHandler(presentingViewController: UIViewController?) -> Int { 0 }
+    func makeAuthenticatedContext(presentingViewController: UIViewController?) -> Context { Context() }
+''' + section + r'''
+}
+@main struct Test {
+    static func main() async {
+        defer { AutomaticRefreshHistory.clear() }
+        let manager = Manager()
+        for mode in 0..<4 {
+            AutomaticRefreshHistory.clear()
+            manager.pipelineRunner.shouldThrow = mode == 1
+            manager.pipelineRunner.shouldFail = mode == 2
+            let group = RefreshGroup(context: Context())
+            var callbacks = 0
+            group.completionHandler = { _ in callbacks += 1 }
+            let actual = manager.refresh([InstalledApp()], presentingViewController: nil,
+                group: group, recordManualHistory: mode != 3)
+            await actual.activeTask?.value
+            precondition(actual === group && callbacks == 1)
+            let entries = AutomaticRefreshHistory.load()
+            if mode == 3 { precondition(entries.isEmpty) }
+            else {
+                precondition(entries.count == 2)
+                precondition(entries[0].event == (mode == 0 ? .completed : .failed))
+                precondition(entries[1].event == .started)
+                precondition(entries.allSatisfy { $0.sourceTitle == "Manual" })
+            }
+        }
+    }
+}
+''')
+        executable = root / "manual-entry-test"
+        result = subprocess.run([SWIFTC, "-parse-as-library", str(path), "-o", str(executable)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        subprocess.run([str(executable)], check=True)
+
+    @unittest.skipUnless(SWIFTC, "Swift compiler required")
+    def test_manual_history_results_and_migration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "main.swift"
+            path.write_text("import Foundation\n" + automation.SCHEDULE_MODEL + r'''
+let defaults = UserDefaults(suiteName: "manual-history-" + UUID().uuidString)!
+defer { AutomaticRefreshHistory.clear(defaults: defaults) }
+let run = UUID()
+AutomaticRefreshHistory.record(.started, runID: run, defaults: defaults, source: .manual)
+precondition(AutomaticRefreshHistory.load(defaults: defaults)[0].sourceTitle == "Manual")
+AutomaticRefreshHistory.finishManual(runID: run, expected: ["a", "b"],
+    results: ["a": Result<Int, Error>.success(1), "b": .success(2)], defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults)[0].event == .completed)
+precondition(AutomaticRefreshHistory.load(defaults: defaults)[0].sourceTitle == "Manual")
+// A late duplicate cannot overwrite the terminal result.
+AutomaticRefreshHistory.finishManual(runID: run, expected: ["a"],
+    results: [String: Result<Int, Error>](), defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults).count == 2)
+AutomaticRefreshHistory.finishManual(runID: UUID(), expected: ["a", "b"],
+    results: ["a": Result<Int, Error>.success(1)], defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults)[0].event == .failed)
+AutomaticRefreshHistory.finishManual(runID: UUID(), expected: ["a", "b"],
+    results: ["a": Result<Int, Error>.success(1), "b": .failure(NSError(domain: "test", code: 1))], defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults)[0].event == .failed)
+AutomaticRefreshHistory.finishManual(runID: UUID(), expected: [],
+    results: [String: Result<Int, Error>](), defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults)[0].event == .skipped)
+AutomaticRefreshHistory.record(.started, defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults)[0].sourceTitle == "Scheduled")
+// Previously stored entries have no source key; decoding must retain them.
+var old = try JSONSerialization.jsonObject(with: defaults.data(forKey: AutomaticRefreshHistory.key)!) as! [[String: Any]]
+for index in old.indices { old[index].removeValue(forKey: "source") }
+defaults.set(try JSONSerialization.data(withJSONObject: old), forKey: AutomaticRefreshHistory.key)
+precondition(AutomaticRefreshHistory.load(defaults: defaults).count == old.count)
+precondition(AutomaticRefreshHistory.load(defaults: defaults).allSatisfy { $0.sourceTitle == "Scheduled" })
+''')
+            executable = Path(directory) / "manual-test"
+            result = subprocess.run([SWIFTC, str(path), "-o", str(executable)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            subprocess.run([str(executable)], check=True)
 
     def check_swiftui(self, root):
         # Compile the actual generated view with SwiftUI, including the upstream

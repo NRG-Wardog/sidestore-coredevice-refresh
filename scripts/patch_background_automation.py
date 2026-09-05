@@ -43,6 +43,11 @@ enum AutomaticRefreshEvent: String, Codable {
     var isTerminal: Bool { [.completed, .failed, .expired, .skipped].contains(self) }
 }
 
+enum RefreshHistorySource: String, Codable {
+    case manual = "Manual"
+    case scheduled = "Scheduled"
+}
+
 struct AutomaticRefreshHistoryEntry: Codable, Identifiable {
     let id: UUID
     let date: Date
@@ -50,6 +55,9 @@ struct AutomaticRefreshHistoryEntry: Codable, Identifiable {
     let runID: UUID?
     let detail: String
     let eligibleDate: Date?
+    let source: RefreshHistorySource?
+
+    var sourceTitle: String { (source ?? .scheduled).rawValue }
 }
 
 enum AutomaticRefreshHistory {
@@ -70,7 +78,8 @@ enum AutomaticRefreshHistory {
     }
 
     static func record(_ event: AutomaticRefreshEvent, runID: UUID? = nil, detail: String = "",
-                       eligibleDate: Date? = nil, now: Date = Date(), defaults: UserDefaults = .standard) {
+                       eligibleDate: Date? = nil, now: Date = Date(), defaults: UserDefaults = .standard,
+                       source: RefreshHistorySource = .scheduled) {
         lock.lock()
         var entries = read(defaults)
         if let runID, event.isTerminal,
@@ -79,7 +88,7 @@ enum AutomaticRefreshHistory {
             return
         }
         entries.insert(AutomaticRefreshHistoryEntry(id: UUID(), date: now, event: event,
-            runID: runID, detail: String(detail.prefix(500)), eligibleDate: eligibleDate), at: 0)
+            runID: runID, detail: String(detail.prefix(500)), eligibleDate: eligibleDate, source: source), at: 0)
         if let data = try? JSONEncoder().encode(Array(entries.prefix(100))) {
             defaults.set(data, forKey: key)
         }
@@ -92,6 +101,26 @@ enum AutomaticRefreshHistory {
         defaults.removeObject(forKey: key)
         lock.unlock()
         NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    static func finishManual<T>(runID: UUID, expected: Set<String>, results: [String: Result<T, Error>],
+                                defaults: UserDefaults = .standard) {
+        if expected.isEmpty {
+            record(.skipped, runID: runID, detail: "No apps selected.", defaults: defaults, source: .manual)
+            return
+        }
+        var succeeded = 0
+        var firstError: String?
+        for identifier in expected {
+            switch results[identifier] {
+            case .success?: succeeded += 1
+            case .failure(let error)?: firstError = firstError ?? error.localizedDescription
+            case nil: firstError = firstError ?? "No completion result received for an app."
+            }
+        }
+        record(succeeded == expected.count ? .completed : .failed, runID: runID,
+               detail: "Refreshed \(succeeded) of \(expected.count) apps." + (firstError.map { " " + $0 } ?? ""),
+               defaults: defaults, source: .manual)
     }
 }
 
@@ -255,6 +284,9 @@ private struct AutomaticRefreshScheduleView: View
                 ForEach(history) { entry in
                     VStack(alignment: .leading, spacing: 4) {
                         Label(entry.event.title, systemImage: entry.event.symbol)
+                        Text(entry.sourceTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(entry.source == .manual ? .blue : .secondary)
                         Text(entry.date, format: .dateTime.year().month().day().hour().minute().second())
                             .font(.caption).foregroundColor(.secondary)
                         if let date = entry.eligibleDate {
@@ -901,7 +933,7 @@ def patch_background_operation(sidestore: Path) -> None:
             '''            let group = AppManager.shared.refresh(apps, presentingViewController: nil)
             group.beginInstallationHandler = { [weak self] (installedApp) in
 ''',
-            '''            let group = AppManager.shared.refresh(apps, presentingViewController: nil)
+            '''            let group = AppManager.shared.refresh(apps, presentingViewController: nil, recordManualHistory: false)
             self.refreshGroupLock.lock()
             self.activeRefreshGroup = group
             let shouldCancel = self.isCancelled
@@ -946,6 +978,43 @@ def patch_background_operation(sidestore: Path) -> None:
         die(f"background operation verification failed: {missing}")
 
 
+def patch_manual_refresh(sidestore: Path) -> None:
+    path = sidestore / "AltStore/Managing Apps/AppManager.swift"
+    text = path.read_text(encoding="utf-8")
+    start = text.index("    func refresh(_ installedApps:")
+    end = text.index("    func activate(", start)
+    section = text[start:end]
+    marker = "let manualHistoryRunID"
+    if marker not in section:
+        section = replace_once(section, "group: RefreshGroup? = nil) -> RefreshGroup",
+                               "group: RefreshGroup? = nil, recordManualHistory: Bool = true) -> RefreshGroup",
+                               "manual history parameter")
+        section = replace_once(section, "        actualGroup.activeTask = Task.detached {", '''        let manualHistoryRunID = recordManualHistory ? UUID() : nil
+        let historyAppIDs = Set(installedApps.map { $0.bundleIdentifier })
+        if let runID = manualHistoryRunID {
+            AutomaticRefreshHistory.record(.started, runID: runID,
+                detail: "Refreshing \\(historyAppIDs.count) apps.", source: .manual)
+        }
+        actualGroup.activeTask = Task.detached {''', "manual history start")
+        section = replace_once(section,
+            "                try await self.pipelineRunner.perform(installedApps.map { .refresh($0) }, handler: pipelineHandler, group: actualGroup)",
+'''                try await self.pipelineRunner.perform(installedApps.map { .refresh($0) }, handler: pipelineHandler, group: actualGroup)
+                if let runID = manualHistoryRunID {
+                    AutomaticRefreshHistory.finishManual(runID: runID, expected: historyAppIDs, results: actualGroup.results)
+                }''', "manual history results")
+        section = replace_once(section, "                actualGroup.context.error = error",
+'''                if let runID = manualHistoryRunID {
+                    AutomaticRefreshHistory.record(.failed, runID: runID,
+                        detail: error.localizedDescription, source: .manual)
+                }
+                actualGroup.context.error = error''', "manual history failure")
+        text = text[:start] + section + text[end:]
+        path.write_text(text, encoding="utf-8")
+    for required in (marker, "recordManualHistory: Bool = true", "AutomaticRefreshHistory.finishManual", "source: .manual"):
+        if required not in section:
+            die(f"manual history verification failed: {required}")
+
+
 def patch_info_plist(sidestore: Path) -> None:
     path = sidestore / "AltStore" / "Info.plist"
     text = path.read_text(encoding="utf-8")
@@ -988,6 +1057,7 @@ def main() -> None:
     patch_app_delegate(sidestore)
     patch_scene_delegate(sidestore)
     patch_background_operation(sidestore)
+    patch_manual_refresh(sidestore)
     patch_info_plist(sidestore)
     patch_settings(sidestore)
     verify(sidestore)

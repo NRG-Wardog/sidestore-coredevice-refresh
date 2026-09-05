@@ -107,6 +107,10 @@ The screen shows the earliest eligible date accepted by iOS, submission errors
 with a retry action, and whether system Background App Refresh is unavailable.
 The same screen includes the latest 100 history events: accepted schedules,
 task starts, completion, failure, skipped runs, and background-time expiration.
+Manual app refreshes and Refresh All also record their start and actual results
+here, tagged **Manual**. Native scheduled events are tagged **Scheduled**.
+Mixed app results are recorded as a failure with the successful app count;
+missing results are never treated as successful refreshes.
 History persists across launches and can be cleared with confirmation. Accepted
 schedules are distinct from actual refresh runs; repeated submissions of the
 same pending date do not add duplicate history entries.
