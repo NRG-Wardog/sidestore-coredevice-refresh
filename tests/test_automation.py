@@ -2,6 +2,7 @@
 from pathlib import Path
 import importlib.util
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -109,6 +110,40 @@ print("Schedule date tests passed")
                                                 capture_output=True, text=True)
                         self.assertEqual(result.returncode, 0, result.stderr)
                 self.check_scheduler(root)
+                if platform.system() == "Darwin":
+                    self.check_swiftui(root)
+
+    def check_swiftui(self, root):
+        # Compile the actual generated view with SwiftUI, including the upstream
+        # Button name collision. Only the UIKit/application boundary is mocked.
+        source = r'''
+import Foundation
+import SwiftUI
+final class Button {}
+extension UserDefaults {
+    var isBackgroundRefreshEnabled: Bool {
+        get { bool(forKey: "testEnabled") }
+        set { set(newValue, forKey: "testEnabled") }
+    }
+}
+@MainActor final class UIApplication {
+    enum Status { case available, denied }
+    static let shared = UIApplication()
+    static let openSettingsURLString = "app-settings:"
+    var backgroundRefreshStatus = Status.available
+    var delegate: AnyObject? = AppDelegate()
+    func open(_ url: URL) {}
+}
+@MainActor final class AppDelegate {
+    func scheduleAutomaticRefresh(replacePending: Bool = false) -> String? { nil }
+}
+''' + automation.SCHEDULE_MODEL + automation.SCHEDULE_UI
+        path = root / "schedule-ui.swift"
+        path.write_text(source, encoding="utf-8")
+        result = subprocess.run([SWIFTC, "-typecheck", "-target",
+                                 f"{platform.machine()}-apple-macosx14.0", str(path)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def check_scheduler(self, root):
         delegate = (root / "AltStore/AppDelegate.swift").read_text(encoding="utf-8")

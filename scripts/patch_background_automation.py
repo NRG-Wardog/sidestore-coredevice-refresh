@@ -91,11 +91,11 @@ private struct AutomaticRefreshScheduleView: View
                 }
                 if let errorMessage {
                     Text(errorMessage).foregroundColor(.red)
-                    Button("Retry Scheduling", action: save)
+                    SwiftUI.Button("Retry Scheduling", action: save)
                 }
                 if !backgroundAvailable {
                     Label("Background App Refresh Unavailable", systemImage: "exclamationmark.triangle")
-                    Button("Open Settings") {
+                    SwiftUI.Button("Open Settings") {
                         if let url = URL(string: UIApplication.openSettingsURLString) {
                             UIApplication.shared.open(url)
                         }
