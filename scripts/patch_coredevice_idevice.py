@@ -428,7 +428,7 @@ def verify(root: Path) -> None:
 
 def main() -> None:
     if len(sys.argv) != 3:
-        die("usage: patch_v29_coredevice_idevice.py <idevice-root> <jktcp-root>")
+        die("usage: patch_coredevice_idevice.py <idevice-root> <jktcp-root>")
     root = Path(sys.argv[1]).resolve()
     jktcp_root = Path(sys.argv[2]).resolve()
     if not (root / "ffi" / "Cargo.toml").is_file():

@@ -1,5 +1,0 @@
-2026-08-31T09:58:00+03:00
-v11 native RemotePairingKit gateway build authorized after two clean local preflight passes.
-SideStore=f3a18d61efae65b05dc935fff75b89225efdb0ff
-minimuxer=71b957efc65e4687a94b1f1dac27fb3344c22936
-legacy IDevice/NAT46/Lockdown bootstrap paths are excluded from this workflow.

@@ -38,7 +38,7 @@ def verify(root: Path) -> None:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        die("usage: patch_v22_local_idevice_package.py <minimuxer-root>")
+        die("usage: patch_local_idevice_package.py <minimuxer-root>")
     root = Path(sys.argv[1])
     gateway = root / "DeviceGateway" / "Package.swift"
     if not gateway.is_file():
@@ -46,7 +46,7 @@ def main() -> None:
     source = gateway.read_text()
     if LOCAL in source:
         verify(root)
-        print("v22 local IDevice package target already present and verified")
+        print("local IDevice package target already present and verified")
         return
     remote = re.compile(
         r'(?ms)^\s*\.binaryTarget\(\s*'
@@ -64,7 +64,7 @@ def main() -> None:
         die(f"expected one active remote IDevice target, replaced {n}")
     gateway.write_text(source)
     verify(root)
-    print("v22 minimuxer now consumes the locally built patched IDevice XCFramework")
+    print("minimuxer now consumes the locally built patched IDevice XCFramework")
 
 
 if __name__ == "__main__":

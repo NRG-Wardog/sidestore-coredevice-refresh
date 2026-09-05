@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sidestore-v30-background-automation
+  group: sidestore-current-background-automation
   cancel-in-progress: false
 
 env:
@@ -62,10 +62,10 @@ jobs:
           test "$(git -C jktcp rev-parse HEAD)" = "$JKTCP_REF"
           python3 -m py_compile \
             builder/scripts/patch_jktcp_reliability.py \
-            builder/scripts/patch_v29_coredevice_idevice.py \
-            builder/scripts/patch_v29_sidestore_integration.py \
-            builder/scripts/patch_v30_background_automation.py \
-            builder/scripts/patch_v22_local_idevice_package.py
+            builder/scripts/patch_coredevice_idevice.py \
+            builder/scripts/patch_sidestore_integration.py \
+            builder/scripts/patch_background_automation.py \
+            builder/scripts/patch_local_idevice_package.py
 
       - name: Select Xcode 26.4
         uses: maxim-lobanov/setup-xcode@v1.6.0
@@ -82,11 +82,8 @@ jobs:
             idevice/target
             jktcp/target
             ~/Library/Caches/org.swift.swiftpm
-          key: sidestore-v30-${{ runner.os }}-${{ env.IDEVICE_REF }}-${{ env.JKTCP_REF }}-${{ env.MINIMUXER_REF }}
+          key: sidestore-current-${{ runner.os }}-${{ env.IDEVICE_REF }}-${{ env.JKTCP_REF }}-${{ env.MINIMUXER_REF }}
           restore-keys: |
-            sidestore-v29-
-            sidestore-v28-
-            sidestore-v27-
             sidestore-
 
       - name: Install build tools
@@ -100,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 builder/scripts/patch_jktcp_reliability.py jktcp
-          python3 builder/scripts/patch_v29_coredevice_idevice.py idevice jktcp
+          python3 builder/scripts/patch_coredevice_idevice.py idevice jktcp
 
           ! grep -R -E 'rppairing_connect_quic|create_quic_listener|quinn::' \
             idevice/ffi/src/tunnel_provider.rs \
@@ -140,11 +137,11 @@ jobs:
           # Apple nm cannot read LLVM metadata in some Rust compiler_builtins
           # members, but it still emits symbols from the FFI members we need.
           xcrun nm -arch arm64 -g target/aarch64-apple-ios/release/libidevice_ffi.a \
-            >/tmp/v29-idevice-symbols.txt 2>/tmp/v29-nm-reader-warnings.txt || true
+            >/tmp/current-idevice-symbols.txt 2>/tmp/current-nm-reader-warnings.txt || true
           grep -E '[[:space:]][Tt][[:space:]]_lockdown_diag_rust_log$' \
-            /tmp/v29-idevice-symbols.txt
+            /tmp/current-idevice-symbols.txt
           grep -E '[[:space:]][Tt][[:space:]]_idevice_set_transport_log_callback$' \
-            /tmp/v29-idevice-symbols.txt
+            /tmp/current-idevice-symbols.txt
           rm -rf swift/IDevice.xcframework
           cp ffi/idevice.h swift/include/idevice.h
           xcodebuild -create-xcframework \
@@ -161,9 +158,9 @@ jobs:
           rm -rf "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
           cp -R idevice/swift/IDevice.xcframework "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
 
-          python3 builder/scripts/patch_v29_sidestore_integration.py "$MUX" "$SIDE"
-          python3 builder/scripts/patch_v30_background_automation.py "$SIDE"
-          python3 builder/scripts/patch_v22_local_idevice_package.py "$MUX"
+          python3 builder/scripts/patch_sidestore_integration.py "$MUX" "$SIDE"
+          python3 builder/scripts/patch_background_automation.py "$SIDE"
+          python3 builder/scripts/patch_local_idevice_package.py "$MUX"
 
           GATEWAY="$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
           PAIRING_PROTOCOL="$MUX/Common/PairingProtocol.swift"
@@ -179,7 +176,7 @@ jobs:
           swiftc -frontend -parse "$SIDE/AltStore/AppDelegate.swift"
           swiftc -frontend -parse "$SIDE/AltStore/SceneDelegate.swift"
           plutil -lint "$SIDE/AltStore/Info.plist"
-          swift package --package-path "$MUX/DeviceGateway" dump-package >/tmp/v29-gateway-package.json
+          swift package --package-path "$MUX/DeviceGateway" dump-package >/tmp/current-gateway-package.json
 
           grep -Fq 'tunnel_create_usb(provider, &adapter, &handshake)' "$GATEWAY"
           grep -Fq '[SIDESTORE_COREDEVICE] PAIRING_MODE_SELECTED' "$GATEWAY"
@@ -227,8 +224,8 @@ jobs:
           precondition(compositeMode == .lockdown)
           print("pairing protocol selection tests passed")
           SWIFT
-          swiftc "$PAIRING_PROTOCOL" /tmp/main.swift -o /tmp/v29-pairing-selection-test
-          /tmp/v29-pairing-selection-test
+          swiftc "$PAIRING_PROTOCOL" /tmp/main.swift -o /tmp/current-pairing-selection-test
+          /tmp/current-pairing-selection-test
           grep -Fq 'CoreDevice heartbeat is maintained by Rust; poll its state without spinning.' \
             "$MUX/Sources/Services/HeartbeatService.swift"
           grep -Fq 'SIDESTORE_SIGN_PASS' "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
@@ -280,15 +277,15 @@ jobs:
           set -euo pipefail
           IPA=work/SideStore/SideStore.ipa
           test -f "$IPA"
-          unzip -t "$IPA" >/tmp/v29-unzip-test.txt
-          rm -rf /tmp/v29-ipa
-          mkdir -p /tmp/v29-ipa
-          unzip -q "$IPA" -d /tmp/v29-ipa
-          test -f /tmp/v29-ipa/Payload/SideStore.app/SideStore
-          test "$(plutil -extract CFBundleDisplayName raw /tmp/v29-ipa/Payload/SideStore.app/Info.plist)" = "SideStore"
+          unzip -t "$IPA" >/tmp/current-unzip-test.txt
+          rm -rf /tmp/current-ipa
+          mkdir -p /tmp/current-ipa
+          unzip -q "$IPA" -d /tmp/current-ipa
+          test -f /tmp/current-ipa/Payload/SideStore.app/SideStore
+          test "$(plutil -extract CFBundleDisplayName raw /tmp/current-ipa/Payload/SideStore.app/Info.plist)" = "SideStore"
 
-          find /tmp/v29-ipa/Payload/SideStore.app -type f -size +32k -print0 \
-            | xargs -0 strings >/tmp/v29-strings.txt
+          find /tmp/current-ipa/Payload/SideStore.app -type f -size +32k -print0 \
+            | xargs -0 strings >/tmp/current-strings.txt
           for marker in \
             '[SIDESTORE_COREDEVICE] PAIRING_MODE_SELECTED' \
             '[SIDESTORE_COREDEVICE] TRANSPORT_CREATE_PASS' \
@@ -309,12 +306,12 @@ jobs:
             '[AUTO_REFRESH] COMPLETE' \
             '[AUTO_REFRESH] EXPIRED' \
             '[AUTO_REFRESH] AUTH_PREFLIGHT_PASS'; do
-            grep -Fq "$marker" /tmp/v29-strings.txt
+            grep -Fq "$marker" /tmp/current-strings.txt
           done
           test "$(plutil -extract BGTaskSchedulerPermittedIdentifiers.0 raw \
-            /tmp/v29-ipa/Payload/SideStore.app/Info.plist)" = \
+            /tmp/current-ipa/Payload/SideStore.app/Info.plist)" = \
             "com.SideStore.SideStore.automatic-refresh"
-          ! grep -E 'rppairing_connect_quic|create_quic_listener|RP-QUIC' /tmp/v29-strings.txt
+          ! grep -E 'rppairing_connect_quic|create_quic_listener|RP-QUIC' /tmp/current-strings.txt
 
           SHA="$(shasum -a 256 "$IPA" | awk '{print $1}')"
           SIZE="$(stat -f '%z' "$IPA")"
@@ -332,7 +329,7 @@ jobs:
             echo 'automation_interval_seconds=21600'
             echo 'quic=false'
             echo 'verification=PASS'
-          } | tee /tmp/v29-verification.txt
+          } | tee /tmp/current-verification.txt
 
       - name: Upload V30 IPA
         uses: actions/upload-artifact@v4
@@ -340,8 +337,8 @@ jobs:
           name: SideStore-v30-background-automation
           path: |
             work/SideStore/SideStore.ipa
-            /tmp/v29-verification.txt
-            /tmp/v29-unzip-test.txt
+            /tmp/current-verification.txt
+            /tmp/current-unzip-test.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -353,9 +350,9 @@ jobs:
           name: SideStore-v30-failure-diagnostics
           path: |
             work/SideStore/build/logs
-            /tmp/v29-gateway-package.json
-            /tmp/v29-strings.txt
-            /tmp/v29-unzip-test.txt
+            /tmp/current-gateway-package.json
+            /tmp/current-strings.txt
+            /tmp/current-unzip-test.txt
           if-no-files-found: ignore
           compression-level: 0
           retention-days: 3

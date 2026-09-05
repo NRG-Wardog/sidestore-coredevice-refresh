@@ -939,7 +939,7 @@ def verify_side_store(sidestore: Path) -> None:
 
 def main() -> None:
     if len(sys.argv) != 3:
-        die("usage: patch_v29_sidestore_integration.py <minimuxer-root> <sidestore-root>")
+        die("usage: patch_sidestore_integration.py <minimuxer-root> <sidestore-root>")
     minimuxer = Path(sys.argv[1]).resolve()
     sidestore = Path(sys.argv[2]).resolve()
     if not (minimuxer / "DeviceGateway" / "idevice" / "IdeviceGateway.swift").is_file():

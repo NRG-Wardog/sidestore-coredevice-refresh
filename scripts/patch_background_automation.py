@@ -560,7 +560,7 @@ def verify(sidestore: Path) -> None:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        die("usage: patch_v30_background_automation.py <sidestore-root>")
+        die("usage: patch_background_automation.py <sidestore-root>")
     sidestore = Path(sys.argv[1]).resolve()
     if not (sidestore / "AltStore.xcodeproj").is_dir():
         die(f"invalid SideStore checkout: {sidestore}")
