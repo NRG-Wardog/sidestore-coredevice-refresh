@@ -5,6 +5,11 @@ over the same iPhone's official App Store LocalDevVPN connection. The final
 runtime does not require a PC, USB, relay server, jailbreak, paid Apple
 Developer account, custom NetworkExtension, or custom VPN application.
 
+With a Free Apple Account / Personal Team, SideStore can keep itself and two
+personally signed apps refreshed on the same iPhone through recurring refresh
+automation, avoiding the normal seven-day interruption as long as the device
+can run the scheduled refresh and the account remains valid.
+
 The user still needs a Free Apple Account / Personal Team, a valid pairing
 file, Developer Mode, Wi-Fi, and the unmodified LocalDevVPN App Store app.
 
