@@ -11,6 +11,90 @@ TASK_IDENTIFIER = "com.SideStore.SideStore.automatic-refresh"
 MARKER = "[AUTO_REFRESH] REGISTER_PASS"
 
 SCHEDULE_MODEL = r'''
+enum AutomaticRefreshEvent: String, Codable {
+    case scheduled, scheduleFailed, disabled, started, completed, failed, expired, skipped, notificationFailed
+
+    var title: String {
+        switch self {
+        case .scheduled: return "Schedule accepted"
+        case .scheduleFailed: return "Scheduling failed"
+        case .disabled: return "Schedule disabled"
+        case .started: return "Refresh started"
+        case .completed: return "Refresh completed"
+        case .failed: return "Refresh failed"
+        case .expired: return "Background time expired"
+        case .skipped: return "Refresh skipped"
+        case .notificationFailed: return "Start alert failed"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .scheduled: return "calendar"
+        case .disabled: return "pause.circle"
+        case .started: return "arrow.clockwise"
+        case .completed: return "checkmark.circle"
+        case .failed, .scheduleFailed, .notificationFailed: return "exclamationmark.circle"
+        case .expired: return "hourglass"
+        case .skipped: return "minus.circle"
+        }
+    }
+
+    var isTerminal: Bool { [.completed, .failed, .expired, .skipped].contains(self) }
+}
+
+struct AutomaticRefreshHistoryEntry: Codable, Identifiable {
+    let id: UUID
+    let date: Date
+    let event: AutomaticRefreshEvent
+    let runID: UUID?
+    let detail: String
+    let eligibleDate: Date?
+}
+
+enum AutomaticRefreshHistory {
+    static let key = "automaticRefreshHistory"
+    static let changed = Notification.Name("AutomaticRefreshHistoryChanged")
+    private static let lock = NSLock()
+
+    private static func read(_ defaults: UserDefaults) -> [AutomaticRefreshHistoryEntry] {
+        guard let data = defaults.data(forKey: key),
+              let entries = try? JSONDecoder().decode([AutomaticRefreshHistoryEntry].self, from: data) else { return [] }
+        return Array(entries.prefix(100))
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> [AutomaticRefreshHistoryEntry] {
+        lock.lock()
+        defer { lock.unlock() }
+        return read(defaults)
+    }
+
+    static func record(_ event: AutomaticRefreshEvent, runID: UUID? = nil, detail: String = "",
+                       eligibleDate: Date? = nil, now: Date = Date(), defaults: UserDefaults = .standard) {
+        lock.lock()
+        var entries = read(defaults)
+        if let runID, event.isTerminal,
+           entries.contains(where: { $0.runID == runID && $0.event.isTerminal }) {
+            lock.unlock()
+            return
+        }
+        entries.insert(AutomaticRefreshHistoryEntry(id: UUID(), date: now, event: event,
+            runID: runID, detail: String(detail.prefix(500)), eligibleDate: eligibleDate), at: 0)
+        if let data = try? JSONEncoder().encode(Array(entries.prefix(100))) {
+            defaults.set(data, forKey: key)
+        }
+        lock.unlock()
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    static func clear(defaults: UserDefaults = .standard) {
+        lock.lock()
+        defaults.removeObject(forKey: key)
+        lock.unlock()
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+}
+
 enum AutomaticRefreshSchedule
 {
     static let dailyKey = "automaticRefreshDaily"
@@ -75,6 +159,10 @@ private struct AutomaticRefreshScheduleView: View
     @State private var errorMessage: String?
     @State private var pendingDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
     @State private var backgroundAvailable = UIApplication.shared.backgroundRefreshStatus == .available
+    @State private var history = AutomaticRefreshHistory.load()
+    @State private var showingClearHistory = false
+    @State private var notificationStatus = UNAuthorizationStatus.notDetermined
+    @State private var notificationError: String?
     @Environment(\.scenePhase) private var scenePhase
 
     private var time: Binding<Date> {
@@ -131,8 +219,75 @@ private struct AutomaticRefreshScheduleView: View
                     }
                 }
             }
+            Section("Start Alert") {
+                HStack {
+                    Text("Notification Permission")
+                    Spacer()
+                    Text(notificationStatus == .authorized ? "Enabled" :
+                         notificationStatus == .provisional ? "Quiet" : "Off")
+                        .foregroundColor(.secondary)
+                }
+                if notificationStatus == .notDetermined {
+                    SwiftUI.Button("Allow Notifications") {
+                        Task {
+                            do {
+                                _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                                await updateNotificationStatus()
+                                notificationError = nil
+                            } catch { notificationError = error.localizedDescription }
+                        }
+                    }
+                } else if notificationStatus != .authorized {
+                    SwiftUI.Button("Notification Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                }
+                if let notificationError {
+                    Text(notificationError).foregroundColor(.red)
+                }
+            }
+            Section {
+                if history.isEmpty {
+                    Text("No refresh history").foregroundColor(.secondary)
+                }
+                ForEach(history) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(entry.event.title, systemImage: entry.event.symbol)
+                        Text(entry.date, format: .dateTime.year().month().day().hour().minute().second())
+                            .font(.caption).foregroundColor(.secondary)
+                        if let date = entry.eligibleDate {
+                            Text("Eligible after \(date.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        if !entry.detail.isEmpty {
+                            Text(entry.detail).font(.caption).foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                HStack {
+                    Text("History")
+                    Spacer()
+                    SwiftUI.Button { showingClearHistory = true } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("Clear History")
+                    .disabled(history.isEmpty)
+                }
+            }
         }
         .navigationTitle("Refresh Schedule")
+        .task { await updateNotificationStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: AutomaticRefreshHistory.changed).receive(on: RunLoop.main)) { _ in
+            history = AutomaticRefreshHistory.load()
+            pendingDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
+        }
+        .confirmationDialog("Clear refresh history?", isPresented: $showingClearHistory, titleVisibility: .visible) {
+            SwiftUI.Button("Clear History", role: .destructive) { AutomaticRefreshHistory.clear() }
+        }
         .onAppear { reschedule(replacePending: false) }
         .onChange(of: enabled) { _ in save() }
         .onChange(of: frequency) { value in
@@ -145,6 +300,8 @@ private struct AutomaticRefreshScheduleView: View
             if phase == .active {
                 enabled = UserDefaults.standard.isBackgroundRefreshEnabled
                 backgroundAvailable = UIApplication.shared.backgroundRefreshStatus == .available
+                history = AutomaticRefreshHistory.load()
+                Task { await updateNotificationStatus() }
             }
         }
     }
@@ -152,6 +309,10 @@ private struct AutomaticRefreshScheduleView: View
     private func save() {
         UserDefaults.standard.isBackgroundRefreshEnabled = enabled
         reschedule(replacePending: true)
+    }
+
+    private func updateNotificationStatus() async {
+        notificationStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
     private func reschedule(replacePending: Bool) {
@@ -203,10 +364,12 @@ def patch_app_delegate(sidestore: Path) -> None:
     state = r'''
 private final class AutomaticRefreshTaskState: @unchecked Sendable
 {
+    let runID = UUID()
     private let task: BGProcessingTask
     private let lock = NSLock()
     private var operation: BackgroundRefreshAppsOperation?
     private var didFinish = false
+    private var didBegin = false
 
     init(task: BGProcessingTask)
     {
@@ -218,6 +381,16 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         self.lock.lock()
         defer { self.lock.unlock() }
         return self.didFinish
+    }
+
+    func begin() -> Bool
+    {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        guard !self.didFinish && !self.didBegin else { return false }
+        self.didBegin = true
+        AutomaticRefreshHistory.record(.started, runID: self.runID)
+        return true
     }
 
     func attach(operation: BackgroundRefreshAppsOperation)
@@ -238,15 +411,10 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
 
     func expire()
     {
-        self.lock.lock()
-        let operation = self.operation
-        self.lock.unlock()
-
-        operation?.cancel()
-        self.finish(success: false)
+        self.finish(success: false, event: .expired, detail: "iOS ended the background execution window.", cancelOperation: true)
     }
 
-    func finish(success: Bool)
+    func finish(success: Bool, event: AutomaticRefreshEvent? = nil, detail: String = "", cancelOperation: Bool = false)
     {
         self.lock.lock()
         guard !self.didFinish else
@@ -255,9 +423,12 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
             return
         }
         self.didFinish = true
+        let operation = self.operation
         self.operation = nil
         self.lock.unlock()
 
+        AutomaticRefreshHistory.record(event ?? (success ? .completed : .failed), runID: self.runID, detail: detail)
+        if cancelOperation { operation?.cancel() }
         self.task.expirationHandler = nil
         self.task.setTaskCompleted(success: success)
     }
@@ -341,6 +512,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         else
         {{
             debugLog("[AUTO_REFRESH] REGISTER_FAIL identifier=\\(Self.automaticRefreshTaskIdentifier)")
+            AutomaticRefreshHistory.record(.scheduleFailed, detail: "Background task registration failed.")
         }}
         #endif
 
@@ -355,14 +527,17 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         #if !os(tvOS)
         guard UserDefaults.standard.isBackgroundRefreshEnabled else
         {{
+            let hadPendingRequest = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) != nil
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.automaticRefreshTaskIdentifier)
             UserDefaults.standard.removeObject(forKey: "automaticRefreshPendingDate")
+            if hadPendingRequest {{ AutomaticRefreshHistory.record(.disabled) }}
             debugLog("[AUTO_REFRESH] SCHEDULE_SKIP reason=disabled")
             return nil
         }}
 
         // Preserve an already eligible request when the app enters the background again.
         let nextDate = AutomaticRefreshSchedule.requestDate(after: Date(), replacePending: replacePending)
+        let previousDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
         let request = BGProcessingTaskRequest(identifier: Self.automaticRefreshTaskIdentifier)
         request.earliestBeginDate = nextDate
         request.requiresNetworkConnectivity = true
@@ -373,11 +548,15 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
             try BGTaskScheduler.shared.submit(request)
             UserDefaults.standard.set(nextDate, forKey: "automaticRefreshPendingDate")
             UserDefaults.standard.set(AutomaticRefreshSchedule.configuration(), forKey: AutomaticRefreshSchedule.configurationKey)
+            if previousDate != nextDate || !AutomaticRefreshHistory.load().contains(where: {{ $0.event == .scheduled && $0.eligibleDate == nextDate }}) {{
+                AutomaticRefreshHistory.record(.scheduled, eligibleDate: nextDate)
+            }}
             debugLog("[AUTO_REFRESH] SCHEDULE_PASS earliest=\\(nextDate) network_required=true external_power_required=false")
         }}
         catch
         {{
             debugLog("[AUTO_REFRESH] SCHEDULE_FAIL error=\\(error.localizedDescription)")
+            AutomaticRefreshHistory.record(.scheduleFailed, detail: error.localizedDescription)
             return error.localizedDescription
         }}
         #endif
@@ -400,9 +579,12 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         guard UserDefaults.standard.isBackgroundRefreshEnabled else
         {{
             debugLog("[AUTO_REFRESH] COMPLETE success=true reason=disabled")
-            state.finish(success: true)
+            state.finish(success: true, event: .skipped, detail: "Background refresh is disabled.")
             return
         }}
+
+        guard state.begin() else {{ return }}
+        self.notifyAutomaticRefreshStarted(runID: state.runID)
 
         Task {{ @MainActor [weak self] in
             guard let self else
@@ -414,6 +596,21 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
             await self.bootTask?.value
             guard !state.isFinished else {{ return }}
             self.startAutomaticRefresh(state: state)
+        }}
+    }}
+
+    private func notifyAutomaticRefreshStarted(runID: UUID)
+    {{
+        let content = UNMutableNotificationContent()
+        content.title = "SideStore refresh started"
+        content.body = "iOS has started your scheduled background refresh."
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: "automatic-refresh-start-" + runID.uuidString,
+                                            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) {{ error in
+            if let error {{
+                AutomaticRefreshHistory.record(.notificationFailed, runID: runID, detail: error.localizedDescription)
+            }}
         }}
     }}
 
@@ -435,7 +632,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
             guard !installedApps.isEmpty else
             {{
                 debugLog("[AUTO_REFRESH] COMPLETE success=true reason=no_eligible_apps")
-                state.finish(success: true)
+                state.finish(success: true, event: .skipped, detail: "No apps are eligible for refresh.")
                 return
             }}
 
@@ -447,21 +644,29 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
                 ) {{ result in
                     let success: Bool
                     let resultCount: Int
+                    var failureDetail = ""
                     switch result
                     {{
                     case .success(let results):
                         resultCount = results.count
                         success = results.values.allSatisfy {{ nestedResult in
-                            if case .success = nestedResult {{ return true }}
-                            return false
+                            switch nestedResult {{
+                            case .success: return true
+                            case .failure(let error):
+                                failureDetail = error.localizedDescription
+                                return false
+                            }}
                         }}
-                    case .failure:
+                    case .failure(let error):
                         resultCount = 0
                         success = false
+                        failureDetail = error.localizedDescription
                     }}
 
                     debugLog("[AUTO_REFRESH] COMPLETE success=\\(success) result_count=\\(resultCount)")
-                    state.finish(success: success)
+                    state.finish(success: success,
+                        event: success && resultCount == 0 ? .skipped : nil,
+                        detail: success ? "Apps refreshed: \\(resultCount)" : failureDetail)
                 }}
                 state.attach(operation: operation)
                 debugLog("[AUTO_REFRESH] OPERATION_START")
@@ -469,7 +674,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
             catch
             {{
                 debugLog("[AUTO_REFRESH] OPERATION_START_FAIL error=\\(error.localizedDescription)")
-                state.finish(success: false)
+                state.finish(success: false, detail: error.localizedDescription)
             }}
         }}
 
@@ -483,7 +688,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
                 if let error
                 {{
                     debugLog("[AUTO_REFRESH] DATABASE_START_FAIL error=\\(error.localizedDescription)")
-                    state.finish(success: false)
+                    state.finish(success: false, detail: error.localizedDescription)
                 }}
                 else
                 {{
@@ -563,6 +768,7 @@ def patch_settings(sidestore: Path) -> None:
         if SCHEDULE_UI not in text:
             die("Settings contains an outdated schedule patch; use the pinned clean checkout")
         return
+    text = replace_once(text, "import SwiftUI\n", "import SwiftUI\nimport UserNotifications\n", "notification settings import")
     text = replace_once(text,
         "        settingsHeaderFooterView.button.isHidden = true\n",
         "        settingsHeaderFooterView.button.isHidden = true\n"

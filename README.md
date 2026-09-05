@@ -105,6 +105,20 @@ may delay execution beyond that point. The schedule screen displays this risk.
 
 The screen shows the earliest eligible date accepted by iOS, submission errors
 with a retry action, and whether system Background App Refresh is unavailable.
+The same screen includes the latest 100 history events: accepted schedules,
+task starts, completion, failure, skipped runs, and background-time expiration.
+History persists across launches and can be cleared with confirmation. Accepted
+schedules are distinct from actual refresh runs; repeated submissions of the
+same pending date do not add duplicate history entries.
+
+A local notification with sound is requested when iOS actually starts an
+enabled scheduled task. It is not scheduled in advance for the preferred time.
+The Start Alert section shows notification permission and provides permission
+or Settings controls. iOS notification settings govern alert presentation.
+History begins with this feature's installation; it does not reconstruct old
+runs from logs. If self-replacement ends the process before its completion
+callback, the history retains the start event without inventing a success.
+
 The task requires network connectivity, but does not require external power.
 iOS controls its actual execution time; the selected time is not a guaranteed
 alarm. This control does not edit personal automations in Apple Shortcuts.

@@ -145,6 +145,7 @@ print("Schedule date tests passed")
                                                 capture_output=True, text=True)
                         self.assertEqual(result.returncode, 0, result.stderr)
                 self.check_scheduler(root)
+                self.check_history_and_lifecycle(root)
                 if platform.system() == "Darwin":
                     self.check_swiftui(root)
 
@@ -154,6 +155,7 @@ print("Schedule date tests passed")
         source = r'''
 import Foundation
 import SwiftUI
+import UserNotifications
 final class Button {}
 extension UserDefaults {
     var isBackgroundRefreshEnabled: Bool {
@@ -214,7 +216,7 @@ final class Delegate {
 ''' + delegate[start:end] + r'''
 }
 let defaults = UserDefaults.standard
-let keys = ["testEnabled", AutomaticRefreshSchedule.frequencyKey, AutomaticRefreshSchedule.weekdayKey,
+let keys = ["testEnabled", AutomaticRefreshHistory.key, AutomaticRefreshSchedule.frequencyKey, AutomaticRefreshSchedule.weekdayKey,
             AutomaticRefreshSchedule.pendingKey, AutomaticRefreshSchedule.configurationKey,
             AutomaticRefreshSchedule.dailyKey, AutomaticRefreshSchedule.minutesKey]
 for key in keys { defaults.removeObject(forKey: key) }
@@ -225,16 +227,22 @@ defaults.isBackgroundRefreshEnabled = true
 precondition(app.scheduleAutomaticRefresh() == nil)
 let accepted = defaults.object(forKey: AutomaticRefreshSchedule.pendingKey) as! Date
 precondition(scheduler.submitted!.earliestBeginDate == accepted)
+precondition(AutomaticRefreshHistory.load().count == 1)
+precondition(AutomaticRefreshHistory.load().first!.event == .scheduled)
+precondition(AutomaticRefreshHistory.load().first!.eligibleDate == accepted)
 precondition(scheduler.submitted!.requiresNetworkConnectivity)
 precondition(!scheduler.submitted!.requiresExternalPower)
 precondition(app.scheduleAutomaticRefresh() == nil)
 precondition(scheduler.submitted!.earliestBeginDate == accepted)
+precondition(AutomaticRefreshHistory.load().count == 1)
 scheduler.shouldFail = true
 precondition(app.scheduleAutomaticRefresh(replacePending: true) != nil)
+precondition(AutomaticRefreshHistory.load().first!.event == .scheduleFailed)
 precondition(defaults.object(forKey: AutomaticRefreshSchedule.pendingKey) as! Date == accepted)
 defaults.isBackgroundRefreshEnabled = false
 precondition(app.scheduleAutomaticRefresh() == nil)
 precondition(scheduler.cancelled)
+precondition(AutomaticRefreshHistory.load().first!.event == .disabled)
 precondition(defaults.object(forKey: AutomaticRefreshSchedule.pendingKey) == nil)
 scheduler.shouldFail = false
 defaults.isBackgroundRefreshEnabled = true
@@ -250,6 +258,135 @@ print("Scheduler boundary tests passed")
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def check_history_and_lifecycle(self, root):
+        delegate = (root / "AltStore/AppDelegate.swift").read_text(encoding="utf-8")
+        start = delegate.index("private final class AutomaticRefreshTaskState")
+        end = delegate.index("@UIApplicationMain", start)
+        handler_start = delegate.index("    private func handleAutomaticRefresh")
+        handler_end = delegate.index("    private func startAutomaticRefresh", handler_start)
+        handler = delegate[handler_start:handler_end].replace("private func handleAutomaticRefresh", "func handleAutomaticRefresh")
+        source = "import Foundation\nimport Dispatch\n" + automation.SCHEDULE_MODEL + r'''
+final class BGProcessingTask {
+    var expirationHandler: (() -> Void)?
+    var results: [Bool] = []
+    func setTaskCompleted(success: Bool) { results.append(success) }
+}
+final class BackgroundRefreshAppsOperation {
+    var cancelled = false
+    var onCancel: (() -> Void)?
+    func cancel() { cancelled = true; onCancel?() }
+}
+''' + delegate[start:end] + r'''
+func debugLog(_ message: String) {}
+extension UserDefaults {
+    var isBackgroundRefreshEnabled: Bool {
+        get { bool(forKey: "historyTestEnabled") }
+        set { set(newValue, forKey: "historyTestEnabled") }
+    }
+}
+struct AlertSound { static let `default` = AlertSound() }
+final class UNMutableNotificationContent {
+    var title = ""
+    var body = ""
+    var sound: AlertSound?
+}
+struct UNNotificationRequest {
+    let identifier: String
+    let content: UNMutableNotificationContent
+    let trigger: Int?
+}
+final class UNUserNotificationCenter {
+    static let shared = UNUserNotificationCenter()
+    static func current() -> UNUserNotificationCenter { shared }
+    var requests: [UNNotificationRequest] = []
+    var fail = false
+    func add(_ request: UNNotificationRequest, withCompletionHandler completion: (Error?) -> Void) {
+        requests.append(request)
+        completion(fail ? NSError(domain: "notification-test", code: 1) : nil)
+    }
+}
+final class EventDelegate {
+    let bootTask: Task<Void, Never>? = nil
+    func scheduleAutomaticRefresh(replacePending: Bool) {}
+    private func startAutomaticRefresh(state: AutomaticRefreshTaskState) {}
+''' + handler + r'''
+}
+let domain = "history-test-" + UUID().uuidString
+let defaults = UserDefaults(suiteName: domain)!
+defer { defaults.removePersistentDomain(forName: domain); AutomaticRefreshHistory.clear() }
+defaults.set(Data("corrupt".utf8), forKey: AutomaticRefreshHistory.key)
+precondition(AutomaticRefreshHistory.load(defaults: defaults).isEmpty)
+let runID = UUID()
+AutomaticRefreshHistory.record(.started, runID: runID, detail: String(repeating: "x", count: 700), defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults).first!.detail.count == 500)
+AutomaticRefreshHistory.record(.expired, runID: runID, defaults: defaults)
+AutomaticRefreshHistory.record(.completed, runID: runID, defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults).map(\.event) == [.expired, .started])
+precondition(AutomaticRefreshHistory.load(defaults: UserDefaults(suiteName: domain)!).count == 2)
+AutomaticRefreshHistory.clear(defaults: defaults)
+DispatchQueue.concurrentPerform(iterations: 150) { index in
+    AutomaticRefreshHistory.record(.scheduled, detail: "\(index)", defaults: defaults)
+}
+let entries = AutomaticRefreshHistory.load(defaults: defaults)
+precondition(entries.count == 100)
+precondition(Set(entries.map(\.id)).count == 100)
+AutomaticRefreshHistory.clear(defaults: defaults)
+precondition(AutomaticRefreshHistory.load(defaults: defaults).isEmpty)
+
+// Expiration must win over synchronous cancellation completion.
+AutomaticRefreshHistory.clear()
+let task = BGProcessingTask()
+private let state = AutomaticRefreshTaskState(task: task)
+precondition(state.begin())
+precondition(!state.begin())
+let operation = BackgroundRefreshAppsOperation()
+operation.onCancel = { state.finish(success: false) }
+state.attach(operation: operation)
+state.expire()
+state.finish(success: true)
+precondition(task.results == [false])
+precondition(operation.cancelled)
+precondition(AutomaticRefreshHistory.load().map(\.event) == [.expired, .started])
+
+// A late attachment is cancelled, without introducing a new history outcome.
+let late = BackgroundRefreshAppsOperation()
+state.attach(operation: late)
+precondition(late.cancelled)
+let completeTask = BGProcessingTask()
+private let completeState = AutomaticRefreshTaskState(task: completeTask)
+precondition(completeState.begin())
+DispatchQueue.concurrentPerform(iterations: 20) { _ in completeState.finish(success: true, detail: "Apps refreshed: 2") }
+precondition(completeTask.results == [true])
+precondition(AutomaticRefreshHistory.load().filter { $0.runID == completeState.runID && $0.event.isTerminal }.count == 1)
+// Actual handler: disabled launches never alert; real launches request an immediate alert.
+AutomaticRefreshHistory.clear()
+let observer = EventDelegate()
+UserDefaults.standard.isBackgroundRefreshEnabled = false
+observer.handleAutomaticRefresh(BGProcessingTask())
+precondition(UNUserNotificationCenter.shared.requests.isEmpty)
+precondition(AutomaticRefreshHistory.load().first!.event == .skipped)
+UserDefaults.standard.isBackgroundRefreshEnabled = true
+observer.handleAutomaticRefresh(BGProcessingTask())
+precondition(UNUserNotificationCenter.shared.requests.count == 1)
+let alert = UNUserNotificationCenter.shared.requests[0]
+precondition(alert.trigger == nil)
+precondition(alert.content.sound != nil)
+precondition(alert.content.title == "SideStore refresh started")
+precondition(AutomaticRefreshHistory.load().first!.event == .started)
+UNUserNotificationCenter.shared.fail = true
+observer.handleAutomaticRefresh(BGProcessingTask())
+precondition(AutomaticRefreshHistory.load().first!.event == .notificationFailed)
+precondition(UNUserNotificationCenter.shared.requests[1].identifier != alert.identifier)
+UserDefaults.standard.removeObject(forKey: "historyTestEnabled")
+print("History and lifecycle tests passed")
+'''
+        path = root / "history.swift"
+        path.write_text(source, encoding="utf-8")
+        binary = root / "history-tests"
+        result = subprocess.run([SWIFTC, str(path), "-o", str(binary)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run([str(binary)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 if __name__ == "__main__":
     unittest.main()
