@@ -34,9 +34,19 @@ actual execution time of a background task.
 
 ## Remaining proof
 
-The configurable Refresh Schedule UI is a new source change. Its date logic
-and patch application have local tests; it has not yet been built or verified
-on an iPhone. Existing device results above predate this UI.
+The configurable Refresh Schedule UI was built successfully from builder
+commit `63f1c0d148c999ae7e93546582c3f65968223642` in
+[Actions run 33972557213](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/runs/33972557213).
+All seven local tests passed, including generated Swift date and scheduler
+tests and patch idempotence against the pinned source. The macOS runner also
+passed a SwiftUI type check with the upstream Button name collision represented,
+transport tests, the full iOS build, and IPA verification.
+
+The downloaded IPA is 27,524,692 bytes with SHA-256
+`fb2c3f710a8151296ab82270b8d838c31d98b05ada3df4ac1158f038793b4ec5`.
+Its executable contains the schedule screen and preference keys. This is build
+and artifact evidence; the new UI has not yet been verified on an iPhone.
+Existing device results above predate this UI.
 
 For this feature, verify switching between six-hour and daily schedules,
 changing the daily time, navigating back and reopening Settings, relaunching
