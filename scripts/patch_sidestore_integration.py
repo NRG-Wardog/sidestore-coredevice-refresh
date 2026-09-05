@@ -612,10 +612,9 @@ func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
         debugLog("[SELF_REFRESH] POST_INSTALL_BROWSE_START bundle_id=\(bundleId)")
         var result: UnsafeMutableRawPointer? = nil
         var count = 0
-        let browseError = bundleId.withCString { bundlePointer in
-            var bundleIds: [UnsafePointer<CChar>?] = [bundlePointer]
-            return installation_proxy_get_apps(client, nil, &bundleIds, 1, &result, &count)
-        }
+        // Free-account signing can rewrite an app ID with the team suffix.
+        // Browse all installed apps so verification checks the signed ID too.
+        let browseError = installation_proxy_get_apps(client, nil, nil, 0, &result, &count)
         if let browseError {
             let message = getErrorMessage(from: browseError)
             idevice_error_free(browseError)
@@ -639,15 +638,19 @@ func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
                     if let versionNode = plist_dict_get_item(application, "CFBundleShortVersionString") {
                         matchedVersion = getRustPlistString(versionNode)
                     }
-                    break
+                } else if identifier.hasPrefix("\(bundleId).") {
+                    matchedIdentifier = identifier
+                    if let versionNode = plist_dict_get_item(application, "CFBundleShortVersionString") {
+                        matchedVersion = getRustPlistString(versionNode)
+                    }
                 }
             }
         }
-        guard matchedIdentifier == bundleId else {
+        guard let matchedIdentifier else {
             throw IdeviceGatewayError(.serviceError, reason: "Installed bundle was not found: \(bundleId)")
         }
-        debugLog("[SELF_REFRESH] INSTALLED_APP_LOOKUP_PASS bundle_id=\(bundleId) version=\(matchedVersion ?? "unknown")")
-        debugLog("[SELF_REFRESH] SIDESTORE_POST_INSTALL_VERIFY_PASS bundle_id=\(bundleId)")
+        debugLog("[SELF_REFRESH] INSTALLED_APP_LOOKUP_PASS requested_bundle_id=\(bundleId) installed_bundle_id=\(matchedIdentifier) version=\(matchedVersion ?? "unknown")")
+        debugLog("[SELF_REFRESH] SIDESTORE_POST_INSTALL_VERIFY_PASS bundle_id=\(matchedIdentifier)")
     }
 
     private func syncInstallIpa(bundleId: String) throws {
