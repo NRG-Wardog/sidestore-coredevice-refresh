@@ -34,6 +34,31 @@ actual execution time of a background task.
 
 ## Remaining proof
 
+### Refresh history build
+
+Builder commit `12c9ffb6f906000f8ad87ce820e64600f71ffc97` passed
+[Actions run 33984781809](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/runs/33984781809).
+It adds persisted history with **Manual** and **Scheduled** source labels,
+manual refresh results, and a local start-alert request for native scheduled
+tasks. All eight local tests passed before dispatch. The macOS repository
+checks (including SwiftUI type checking), transport tests, full iOS build,
+and IPA verification passed in CI.
+
+Tests cover old history decoding, partial failures, missing results, terminal
+event deduplication, and the generated manual refresh entry point with mocked
+pipeline results. Background callers opt out of manual recording to avoid
+duplicate entries. Existing refresh callbacks remain intact.
+
+The downloaded IPA is 27,555,473 bytes with SHA-256
+`ce675097ab87d93073c0fd807ad6c2c574452b8c099c831742b0c004d6dd1d21`.
+Local checks confirmed its archive integrity and history, start-alert, and
+manual-result strings in the executable. The local `new.ipa` matches this hash.
+Manual/Scheduled labels, persisted results, and notification presentation still
+require on-device verification. A start without a completion callback is not
+proof of a successful refresh, particularly during self-replacement.
+
+### Schedule UI builds
+
 The configurable Refresh Schedule UI was built successfully from builder
 commit `63f1c0d148c999ae7e93546582c3f65968223642` in
 [Actions run 33972557213](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/runs/33972557213).
