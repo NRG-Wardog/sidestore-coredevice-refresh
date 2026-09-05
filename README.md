@@ -180,3 +180,38 @@ disconnected.
 
 Never upload or commit a pairing file, certificate private key, or unnecessary
 device identifier.
+
+## Repository Quality
+
+The repository contains only build-time patch scripts and documentation. It
+does not vendor SideStore or its dependency source trees. The upstream source
+is checked out at pinned revisions during the build and patched in the runner.
+
+The public-release safeguards are documented in:
+
+- `LICENSE`
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+- `docs/VERIFICATION.md`
+- `tests/test_repository.py`
+
+Run the local checks with:
+
+```text
+python -m unittest discover -s tests -v
+```
+
+The current build architecture is:
+
+```text
+official LocalDevVPN
+        |
+        v
+Lockdown pairing -> CoreDeviceProxy/TLS -> CDTunnel -> jktcp IPv6
+                                                        |
+                                                        v
+                                             RSD -> AFC -> InstallationProxy
+                                                        |
+                                                        v
+                                             SideStore refresh/install
+```

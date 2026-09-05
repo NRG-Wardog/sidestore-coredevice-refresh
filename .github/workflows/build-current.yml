@@ -67,6 +67,11 @@ jobs:
             builder/scripts/patch_background_automation.py \
             builder/scripts/patch_local_idevice_package.py
 
+      - name: Run repository checks
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s builder/tests -v
+
       - name: Select Xcode 26.4
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:

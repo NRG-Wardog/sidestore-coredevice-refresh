@@ -222,11 +222,11 @@ func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
 
     text = replace_once(
         text,
-        """    public func setLogging(_ enabled: Bool) {
+        r"""    public func setLogging(_ enabled: Bool) {
         DeviceGatewayLogging.setLogging(enabled)
         debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
 """,
-        """    public func setLogging(_ enabled: Bool) {
+        r"""    public func setLogging(_ enabled: Bool) {
         idevice_set_transport_log_callback(sideStoreTransportLog)
         DeviceGatewayLogging.setLogging(enabled)
         debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
@@ -251,14 +251,14 @@ func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
 
     text = replace_once(
         text,
-        """    public func setRemotePairingPort(_ port: UInt16) {
+        r"""    public func setRemotePairingPort(_ port: UInt16) {
         debugLog("[IdeviceGateway] setRemotePairingPort(\(port)) called")
         guard self.remotePairingPort != port else { return }
         self.remotePairingPort = port
         invalidateConnection()
     }
 """,
-        """    public func setRemotePairingPort(_ port: UInt16) {
+        r"""    public func setRemotePairingPort(_ port: UInt16) {
         ffiQueue.sync {
             debugLog("[IdeviceGateway] setRemotePairingPort(\(port)) called")
             guard self.remotePairingPort != port else { return }
@@ -365,7 +365,7 @@ func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
 
     text = replace_once(
         text,
-        """    public func setDeviceEndpointIp(_ ip: String?) {
+        r"""    public func setDeviceEndpointIp(_ ip: String?) {
         debugLog("[IdeviceGateway] setDeviceEndpointIp(\(ip ?? "nil")) called")
         guard self.deviceEndpointIp != ip else {
             debugLog("[IdeviceGateway] setDeviceEndpointIp: IP is already \(ip ?? "nil"), skipping invalidation")
@@ -389,7 +389,7 @@ func sideStoreTransportLog(_ message: UnsafePointer<CChar>?) {
             "self.deviceEndpointIp = ip\n\n        //",
             "self.deviceEndpointIp = ip\n        \n        //",
         ),
-        """    public func setDeviceEndpointIp(_ ip: String?) {
+        r"""    public func setDeviceEndpointIp(_ ip: String?) {
         ffiQueue.sync {
             debugLog("[IdeviceGateway] setDeviceEndpointIp(\(ip ?? "nil")) called")
             guard self.deviceEndpointIp != ip else {
