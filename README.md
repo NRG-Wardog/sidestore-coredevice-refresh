@@ -14,7 +14,7 @@ The current path is:
 
 ```text
 LocalDevVPN / same-subnet /32 route
-    -> Lockdown on 10.0.0.241:62078
+    -> Lockdown on the device peer at port 62078
     -> CoreDeviceProxy over TLS
     -> CDTunnel
     -> jktcp userspace IPv6 adapter
@@ -22,11 +22,11 @@ LocalDevVPN / same-subnet /32 route
     -> AFC and InstallationProxy
 ```
 
-The working LocalDevVPN topology is:
+The tested LocalDevVPN topology uses same-subnet `/32` addresses:
 
 ```text
-Tunnel IP:       10.0.0.240/32
-Device peer IP:  10.0.0.241/32
+Tunnel IP:       TUNNEL_IP/32
+Device peer IP:  DEVICE_PEER_IP/32
 ```
 
 The implementation intentionally does not use QUIC or RemotePairing dynamic
