@@ -48,6 +48,16 @@ Its executable contains the schedule screen and preference keys. This is build
 and artifact evidence; the new UI has not yet been verified on an iPhone.
 Existing device results above predate this UI.
 
+Weekly scheduling was added in builder commit
+`7e2384709f7beebd87890b6beaf5497dd2310c63` and built successfully in
+[Actions run 33980149032](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/runs/33980149032).
+The same local and macOS checks passed, with additional cases for weekly
+rollover, weekday changes, legacy daily preferences, and daylight-saving
+transitions. The verified IPA is 27,530,865 bytes with SHA-256
+`cb5691bd04fd18bbf691ab6a8296ab23f1ba2cb7dc3a20a5c710474ecd03d2a3`.
+Its executable contains the frequency and weekday preference keys.
+On-device verification of weekly scheduling remains pending.
+
 For this feature, verify switching between six-hour and daily schedules,
 changing the daily time, navigating back and reopening Settings, relaunching
 SideStore, disabling refresh, and recovering from system scheduling errors.
