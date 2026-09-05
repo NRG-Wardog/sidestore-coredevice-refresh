@@ -1,4 +1,4 @@
-name: Build V29 CoreDevice Self Refresh
+name: Build V30 Background Automation
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sidestore-v29-coredevice-self-refresh
+  group: sidestore-v30-background-automation
   cancel-in-progress: false
 
 env:
@@ -64,6 +64,7 @@ jobs:
             builder/scripts/patch_jktcp_reliability.py \
             builder/scripts/patch_v29_coredevice_idevice.py \
             builder/scripts/patch_v29_sidestore_integration.py \
+            builder/scripts/patch_v30_background_automation.py \
             builder/scripts/patch_v22_local_idevice_package.py
 
       - name: Select Xcode 26.4
@@ -81,8 +82,9 @@ jobs:
             idevice/target
             jktcp/target
             ~/Library/Caches/org.swift.swiftpm
-          key: sidestore-v29-${{ runner.os }}-${{ env.IDEVICE_REF }}-${{ env.JKTCP_REF }}-${{ env.MINIMUXER_REF }}
+          key: sidestore-v30-${{ runner.os }}-${{ env.IDEVICE_REF }}-${{ env.JKTCP_REF }}-${{ env.MINIMUXER_REF }}
           restore-keys: |
+            sidestore-v29-
             sidestore-v28-
             sidestore-v27-
             sidestore-
@@ -160,6 +162,7 @@ jobs:
           cp -R idevice/swift/IDevice.xcframework "$MUX/DeviceGateway/LocalBinary/IDevice.xcframework"
 
           python3 builder/scripts/patch_v29_sidestore_integration.py "$MUX" "$SIDE"
+          python3 builder/scripts/patch_v30_background_automation.py "$SIDE"
           python3 builder/scripts/patch_v22_local_idevice_package.py "$MUX"
 
           GATEWAY="$MUX/DeviceGateway/idevice/IdeviceGateway.swift"
@@ -172,7 +175,10 @@ jobs:
           swiftc -frontend -parse "$MINIMUXER_IMPL"
           swiftc -frontend -parse "$MUX/Sources/Services/HeartbeatService.swift"
           swiftc -frontend -parse "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
+          swiftc -frontend -parse "$SIDE/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift"
           swiftc -frontend -parse "$SIDE/AltStore/AppDelegate.swift"
+          swiftc -frontend -parse "$SIDE/AltStore/SceneDelegate.swift"
+          plutil -lint "$SIDE/AltStore/Info.plist"
           swift package --package-path "$MUX/DeviceGateway" dump-package >/tmp/v29-gateway-package.json
 
           grep -Fq 'tunnel_create_usb(provider, &adapter, &handshake)' "$GATEWAY"
@@ -227,6 +233,17 @@ jobs:
             "$MUX/Sources/Services/HeartbeatService.swift"
           grep -Fq 'SIDESTORE_SIGN_PASS' "$SIDE/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift"
           grep -Fq 'SELF_REFRESH_COMPLETE' "$SIDE/AltStore/AppDelegate.swift"
+          grep -Fq '[AUTO_REFRESH] REGISTER_PASS' "$SIDE/AltStore/AppDelegate.swift"
+          grep -Fq 'BGProcessingTaskRequest' "$SIDE/AltStore/AppDelegate.swift"
+          grep -Fq 'requiresNetworkConnectivity = true' "$SIDE/AltStore/AppDelegate.swift"
+          grep -Fq 'await self.bootTask?.value' "$SIDE/AltStore/AppDelegate.swift"
+          grep -Fq 'scheduleAutomaticRefresh()' "$SIDE/AltStore/SceneDelegate.swift"
+          grep -Fq '[AUTO_REFRESH] AUTH_PREFLIGHT_PASS' \
+            "$SIDE/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift"
+          grep -Fq 'override func cancel()' \
+            "$SIDE/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift"
+          test "$(plutil -extract BGTaskSchedulerPermittedIdentifiers.0 raw "$SIDE/AltStore/Info.plist")" = \
+            "com.SideStore.SideStore.automatic-refresh"
           ! grep -Fq 'free(outResult)' "$GATEWAY"
 
       - name: Resolve Swift packages
@@ -258,7 +275,7 @@ jobs:
           make fakesign 2>&1 | tee -a build/logs/build.log
           make ipa 2>&1 | tee -a build/logs/build.log
 
-      - name: Verify V29 IPA
+      - name: Verify V30 IPA
         run: |
           set -euo pipefail
           IPA=work/SideStore/SideStore.ipa
@@ -283,15 +300,26 @@ jobs:
             '[SELF_REFRESH] SIDESTORE_INSTALL_REQUEST_PASS' \
             '[SELF_REFRESH] SIDESTORE_INSTALL_COMPLETE' \
             '[SELF_REFRESH] SIDESTORE_POST_INSTALL_VERIFY_PASS' \
-            '[SELF_REFRESH] SELF_REFRESH_COMPLETE'; do
+            '[SELF_REFRESH] SELF_REFRESH_COMPLETE' \
+            '[AUTO_REFRESH] REGISTER_PASS' \
+            '[AUTO_REFRESH] SCHEDULE_PASS' \
+            '[AUTO_REFRESH] TRIGGER source=bgprocessing' \
+            '[AUTO_REFRESH] ELIGIBLE_APPS' \
+            '[AUTO_REFRESH] OPERATION_START' \
+            '[AUTO_REFRESH] COMPLETE' \
+            '[AUTO_REFRESH] EXPIRED' \
+            '[AUTO_REFRESH] AUTH_PREFLIGHT_PASS'; do
             grep -Fq "$marker" /tmp/v29-strings.txt
           done
+          test "$(plutil -extract BGTaskSchedulerPermittedIdentifiers.0 raw \
+            /tmp/v29-ipa/Payload/SideStore.app/Info.plist)" = \
+            "com.SideStore.SideStore.automatic-refresh"
           ! grep -E 'rppairing_connect_quic|create_quic_listener|RP-QUIC' /tmp/v29-strings.txt
 
           SHA="$(shasum -a 256 "$IPA" | awk '{print $1}')"
           SIZE="$(stat -f '%z' "$IPA")"
           {
-            echo 'SideStore V29 CoreDevice Self Refresh'
+            echo 'SideStore V30 Background Automation'
             echo "builder_commit=$GITHUB_SHA"
             echo "sidestore_ref=$SIDESTORE_REF"
             echo "minimuxer_ref=$MINIMUXER_REF"
@@ -300,14 +328,16 @@ jobs:
             echo "ipa_size=$SIZE"
             echo "ipa_sha256=$SHA"
             echo 'transport=lockdown-coredevice-cdtunnel-rsd'
+            echo 'automation=BGProcessingTask'
+            echo 'automation_interval_seconds=21600'
             echo 'quic=false'
             echo 'verification=PASS'
           } | tee /tmp/v29-verification.txt
 
-      - name: Upload V29 IPA
+      - name: Upload V30 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: SideStore-v29-coredevice-self-refresh
+          name: SideStore-v30-background-automation
           path: |
             work/SideStore/SideStore.ipa
             /tmp/v29-verification.txt
@@ -320,7 +350,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: SideStore-v29-failure-diagnostics
+          name: SideStore-v30-failure-diagnostics
           path: |
             work/SideStore/build/logs
             /tmp/v29-gateway-package.json
