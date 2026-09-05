@@ -68,6 +68,8 @@ jobs:
             builder/scripts/patch_local_idevice_package.py
 
       - name: Run repository checks
+        env:
+          SIDESTORE_TEST_SOURCE: ${{ github.workspace }}/work/SideStore
         run: |
           set -euo pipefail
           python3 -m unittest discover -s builder/tests -v
@@ -180,6 +182,7 @@ jobs:
           swiftc -frontend -parse "$SIDE/SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift"
           swiftc -frontend -parse "$SIDE/AltStore/AppDelegate.swift"
           swiftc -frontend -parse "$SIDE/AltStore/SceneDelegate.swift"
+          swiftc -frontend -parse "$SIDE/AltStore/Settings/SettingsViewController.swift"
           plutil -lint "$SIDE/AltStore/Info.plist"
           swift package --package-path "$MUX/DeviceGateway" dump-package >/tmp/current-gateway-package.json
 

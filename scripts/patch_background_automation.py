@@ -10,6 +10,137 @@ import sys
 TASK_IDENTIFIER = "com.SideStore.SideStore.automatic-refresh"
 MARKER = "[AUTO_REFRESH] REGISTER_PASS"
 
+SCHEDULE_MODEL = r'''
+enum AutomaticRefreshSchedule
+{
+    static let dailyKey = "automaticRefreshDaily"
+    static let minutesKey = "automaticRefreshMinutes"
+    static let pendingKey = "automaticRefreshPendingDate"
+    static let configurationKey = "automaticRefreshPendingConfiguration"
+
+    static func configuration(defaults: UserDefaults = .standard, calendar: Calendar = .current) -> String {
+        "\(defaults.bool(forKey: dailyKey)):\(defaults.object(forKey: minutesKey) as? Int ?? 600):\(calendar.timeZone.identifier)"
+    }
+
+    static func requestDate(after now: Date, replacePending: Bool, defaults: UserDefaults = .standard,
+                            calendar: Calendar = .current) -> Date {
+        if !replacePending,
+           defaults.string(forKey: configurationKey) == configuration(defaults: defaults, calendar: calendar),
+           let pending = defaults.object(forKey: pendingKey) as? Date {
+            return pending
+        }
+        return nextDate(after: now, defaults: defaults, calendar: calendar)
+    }
+
+    static func nextDate(after now: Date, defaults: UserDefaults = .standard,
+                         calendar: Calendar = .current) -> Date
+    {
+        guard defaults.bool(forKey: dailyKey) else {
+            return now.addingTimeInterval(6 * 60 * 60)
+        }
+        let saved = defaults.object(forKey: minutesKey) as? Int ?? 600
+        let minutes = (0..<1440).contains(saved) ? saved : 600
+        return calendar.nextDate(after: now,
+            matching: DateComponents(hour: minutes / 60, minute: minutes % 60, second: 0),
+            matchingPolicy: .nextTime, repeatedTimePolicy: .first)
+            ?? now.addingTimeInterval(6 * 60 * 60)
+    }
+}
+'''
+
+SCHEDULE_UI = r'''
+#if !os(tvOS)
+private struct AutomaticRefreshScheduleView: View
+{
+    @State private var enabled = UserDefaults.standard.isBackgroundRefreshEnabled
+    @AppStorage(AutomaticRefreshSchedule.dailyKey) private var daily = false
+    @AppStorage(AutomaticRefreshSchedule.minutesKey) private var minutes = 600
+    @State private var errorMessage: String?
+    @State private var pendingDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
+    @State private var backgroundAvailable = UIApplication.shared.backgroundRefreshStatus == .available
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var time: Binding<Date> {
+        Binding(get: {
+            let value = (0..<1440).contains(minutes) ? minutes : 600
+            return Calendar.current.date(bySettingHour: value / 60, minute: value % 60,
+                                         second: 0, of: Date()) ?? Date()
+        }, set: { date in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            minutes = (parts.hour ?? 10) * 60 + (parts.minute ?? 0)
+        })
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Background Refresh", isOn: $enabled)
+                Picker("Schedule", selection: $daily) {
+                    Text("Every Six Hours").tag(false)
+                    Text("Daily").tag(true)
+                }
+                .disabled(!enabled)
+                if daily {
+                    DatePicker("Preferred Time", selection: time, displayedComponents: .hourAndMinute)
+                        .disabled(!enabled)
+                }
+            }
+            Section {
+                if enabled, let pendingDate {
+                    AutomaticRefreshPendingDateView(date: pendingDate)
+                }
+                if let errorMessage {
+                    Text(errorMessage).foregroundColor(.red)
+                    Button("Retry Scheduling", action: save)
+                }
+                if !backgroundAvailable {
+                    Label("Background App Refresh Unavailable", systemImage: "exclamationmark.triangle")
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Refresh Schedule")
+        .onAppear { reschedule(replacePending: false) }
+        .onChange(of: enabled) { _ in save() }
+        .onChange(of: daily) { _ in save() }
+        .onChange(of: minutes) { _ in save() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                enabled = UserDefaults.standard.isBackgroundRefreshEnabled
+                backgroundAvailable = UIApplication.shared.backgroundRefreshStatus == .available
+            }
+        }
+    }
+
+    private func save() {
+        UserDefaults.standard.isBackgroundRefreshEnabled = enabled
+        reschedule(replacePending: true)
+    }
+
+    private func reschedule(replacePending: Bool) {
+        errorMessage = (UIApplication.shared.delegate as? AppDelegate)?
+            .scheduleAutomaticRefresh(replacePending: replacePending)
+        pendingDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
+    }
+}
+
+private struct AutomaticRefreshPendingDateView: View {
+    let date: Date
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Earliest Eligible Refresh")
+            Text(date, style: .date).foregroundColor(.secondary)
+            Text(date, style: .time).foregroundColor(.secondary)
+        }
+    }
+}
+#endif
+'''
+
 
 def die(message: str) -> None:
     raise SystemExit(message)
@@ -103,7 +234,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
     text = replace_once(
         text,
         "@UIApplicationMain\nfinal class AppDelegate",
-        state + "@UIApplicationMain\nfinal class AppDelegate",
+        SCHEDULE_MODEL + state + "@UIApplicationMain\nfinal class AppDelegate",
         "automatic refresh task state",
     )
 
@@ -149,7 +280,6 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
 '''
         ),
         f'''    private static let automaticRefreshTaskIdentifier = "{TASK_IDENTIFIER}"
-    private static let automaticRefreshInterval: TimeInterval = 6 * 60 * 60
 
     private func prepareForBackgroundFetch()
     {{
@@ -186,38 +316,47 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         #endif
     }}
 
-    func scheduleAutomaticRefresh()
+    @discardableResult
+    func scheduleAutomaticRefresh(replacePending: Bool = false) -> String?
     {{
         #if !os(tvOS)
         guard UserDefaults.standard.isBackgroundRefreshEnabled else
         {{
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.automaticRefreshTaskIdentifier)
+            UserDefaults.standard.removeObject(forKey: "automaticRefreshPendingDate")
             debugLog("[AUTO_REFRESH] SCHEDULE_SKIP reason=disabled")
-            return
+            return nil
         }}
 
+        // Preserve an already eligible request when the app enters the background again.
+        let nextDate = AutomaticRefreshSchedule.requestDate(after: Date(), replacePending: replacePending)
         let request = BGProcessingTaskRequest(identifier: Self.automaticRefreshTaskIdentifier)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: Self.automaticRefreshInterval)
+        request.earliestBeginDate = nextDate
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
 
         do
         {{
             try BGTaskScheduler.shared.submit(request)
-            debugLog("[AUTO_REFRESH] SCHEDULE_PASS earliest_seconds=\\(Int(Self.automaticRefreshInterval)) network_required=true external_power_required=false")
+            UserDefaults.standard.set(nextDate, forKey: "automaticRefreshPendingDate")
+            UserDefaults.standard.set(AutomaticRefreshSchedule.configuration(), forKey: AutomaticRefreshSchedule.configurationKey)
+            debugLog("[AUTO_REFRESH] SCHEDULE_PASS earliest=\\(nextDate) network_required=true external_power_required=false")
         }}
         catch
         {{
             debugLog("[AUTO_REFRESH] SCHEDULE_FAIL error=\\(error.localizedDescription)")
+            return error.localizedDescription
         }}
         #endif
+        return nil
     }}
 
     #if !os(tvOS)
     private func handleAutomaticRefresh(_ task: BGProcessingTask)
     {{
         debugLog("[AUTO_REFRESH] TRIGGER source=bgprocessing")
-        self.scheduleAutomaticRefresh()
+        UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.pendingKey)
+        self.scheduleAutomaticRefresh(replacePending: true)
 
         let state = AutomaticRefreshTaskState(task: task)
         task.expirationHandler = {{
@@ -345,6 +484,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
 
 def verify_app_delegate(text: str) -> None:
     required = [
+        SCHEDULE_MODEL,
         "import BackgroundTasks",
         MARKER,
         TASK_IDENTIFIER,
@@ -381,6 +521,44 @@ def patch_scene_delegate(sidestore: Path) -> None:
         path.write_text(text, encoding="utf-8")
     if marker not in text:
         die("SceneDelegate automatic refresh scheduling missing")
+
+
+def patch_settings(sidestore: Path) -> None:
+    path = sidestore / "AltStore" / "Settings" / "SettingsViewController.swift"
+    text = path.read_text(encoding="utf-8")
+    if "private struct AutomaticRefreshScheduleView" in text:
+        if SCHEDULE_UI not in text:
+            die("Settings contains an outdated schedule patch; use the pinned clean checkout")
+        return
+    text = replace_once(text,
+        "        settingsHeaderFooterView.button.isHidden = true\n",
+        "        settingsHeaderFooterView.button.isHidden = true\n"
+        "        settingsHeaderFooterView.button.removeTarget(nil, action: nil, for: .primaryActionTriggered)\n",
+        "clear reused footer actions")
+    text = replace_once(text,
+        "        UserDefaults.standard.isBackgroundRefreshEnabled = sender.isOn\n",
+        "        UserDefaults.standard.isBackgroundRefreshEnabled = sender.isOn\n"
+        "        (UIApplication.shared.delegate as? AppDelegate)?.scheduleAutomaticRefresh(replacePending: true)\n",
+        "reschedule on toggle")
+    anchor = '                settingsHeaderFooterView.secondaryLabel.text = NSLocalizedString("Enable Background Refresh'
+    start = text.index(anchor)
+    text = text[:start] + '''                #if !os(tvOS)
+                settingsHeaderFooterView.button.setTitle(NSLocalizedString("Refresh Schedule", comment: ""), for: .normal)
+                settingsHeaderFooterView.button.addTarget(self, action: #selector(openRefreshSchedule), for: .primaryActionTriggered)
+                settingsHeaderFooterView.button.isHidden = false
+                #endif
+''' + text[start:]
+    text = replace_once(text, "    @IBAction func toggleIsBackgroundRefreshEnabled(_ sender: UISwitch)",
+        '''    #if !os(tvOS)
+    @objc func openRefreshSchedule()
+    {
+        let controller = UIHostingController(rootView: AutomaticRefreshScheduleView())
+        self.show(controller, sender: nil)
+    }
+    #endif
+
+    @IBAction func toggleIsBackgroundRefreshEnabled(_ sender: UISwitch)''', "schedule navigation")
+    path.write_text(text + SCHEDULE_UI, encoding="utf-8")
 
 
 def patch_background_operation(sidestore: Path) -> None:
@@ -556,6 +734,9 @@ def verify(sidestore: Path) -> None:
     scene = (sidestore / "AltStore" / "SceneDelegate.swift").read_text(encoding="utf-8")
     if "scheduleAutomaticRefresh()" not in scene:
         die("SceneDelegate verification failed")
+    settings = (sidestore / "AltStore/Settings/SettingsViewController.swift").read_text(encoding="utf-8")
+    if SCHEDULE_UI not in settings or "#selector(openRefreshSchedule)" not in settings:
+        die("Settings schedule verification failed")
 
 
 def main() -> None:
@@ -569,6 +750,7 @@ def main() -> None:
     patch_scene_delegate(sidestore)
     patch_background_operation(sidestore)
     patch_info_plist(sidestore)
+    patch_settings(sidestore)
     verify(sidestore)
     print("V30 background automation patch applied and verified")
 

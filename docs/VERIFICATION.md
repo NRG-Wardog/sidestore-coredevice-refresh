@@ -34,6 +34,17 @@ actual execution time of a background task.
 
 ## Remaining proof
 
+The configurable Refresh Schedule UI is a new source change. Its date logic
+and patch application have local tests; it has not yet been built or verified
+on an iPhone. Existing device results above predate this UI.
+
+For this feature, verify switching between six-hour and daily schedules,
+changing the daily time, navigating back and reopening Settings, relaunching
+SideStore, disabling refresh, and recovering from system scheduling errors.
+Confirm the logged accepted date and the UI agree. Test the UI with large text
+and both device orientations. Editing this schedule must leave any personal
+Shortcuts automation unchanged.
+
 Full PC-free automation is proven only after a scheduled task runs while the
 PC is disconnected and produces:
 

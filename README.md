@@ -91,10 +91,23 @@ SideStore now registers a native iOS `BGProcessingTask` with the identifier:
 com.SideStore.SideStore.automatic-refresh
 ```
 
-The task is submitted with network connectivity required and external power
-not required. It is requested approximately every six hours, but iOS controls
-the actual execution time. The six-hour value is an earliest eligible time,
-not a guaranteed timer.
+Settings > Refreshing Apps > Refresh Schedule controls the native schedule.
+Background Refresh can be enabled or disabled there. Choose Every Six Hours
+(the existing default), or Daily and a preferred local time. Daily initially
+shows 10:00. Changes are saved immediately and replace the pending request.
+Disabling Background Refresh cancels that request.
+
+The screen shows the earliest eligible date accepted by iOS, submission errors
+with a retry action, and whether system Background App Refresh is unavailable.
+The task requires network connectivity, but does not require external power.
+iOS controls its actual execution time; the selected time is not a guaranteed
+alarm. This control does not edit personal automations in Apple Shortcuts.
+An existing daily Shortcuts automation must still be edited in Shortcuts.
+
+Scheduling preserves a pending request across app launches and background
+transitions so reopening SideStore does not postpone it. Daily calculations
+use the local calendar, handle daylight-saving transitions, and recalculate
+when a different time zone is observed.
 
 When iOS runs the task, SideStore:
 
