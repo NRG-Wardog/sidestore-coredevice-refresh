@@ -14,12 +14,25 @@ SCHEDULE_MODEL = r'''
 enum AutomaticRefreshSchedule
 {
     static let dailyKey = "automaticRefreshDaily"
+    static let frequencyKey = "automaticRefreshFrequency"
+    static let weekdayKey = "automaticRefreshWeekday"
     static let minutesKey = "automaticRefreshMinutes"
     static let pendingKey = "automaticRefreshPendingDate"
     static let configurationKey = "automaticRefreshPendingConfiguration"
 
+    static func frequency(defaults: UserDefaults = .standard) -> String {
+        if let saved = defaults.string(forKey: frequencyKey),
+           ["interval", "daily", "weekly"].contains(saved) { return saved }
+        return defaults.bool(forKey: dailyKey) ? "daily" : "interval"
+    }
+
+    static func weekday(defaults: UserDefaults = .standard) -> Int {
+        let saved = defaults.object(forKey: weekdayKey) as? Int ?? 2
+        return (1...7).contains(saved) ? saved : 2
+    }
+
     static func configuration(defaults: UserDefaults = .standard, calendar: Calendar = .current) -> String {
-        "\(defaults.bool(forKey: dailyKey)):\(defaults.object(forKey: minutesKey) as? Int ?? 600):\(calendar.timeZone.identifier)"
+        "\(frequency(defaults: defaults)):\(weekday(defaults: defaults)):\(defaults.object(forKey: minutesKey) as? Int ?? 600):\(calendar.timeZone.identifier)"
     }
 
     static func requestDate(after now: Date, replacePending: Bool, defaults: UserDefaults = .standard,
@@ -35,13 +48,16 @@ enum AutomaticRefreshSchedule
     static func nextDate(after now: Date, defaults: UserDefaults = .standard,
                          calendar: Calendar = .current) -> Date
     {
-        guard defaults.bool(forKey: dailyKey) else {
+        let frequency = Self.frequency(defaults: defaults)
+        guard frequency != "interval" else {
             return now.addingTimeInterval(6 * 60 * 60)
         }
         let saved = defaults.object(forKey: minutesKey) as? Int ?? 600
         let minutes = (0..<1440).contains(saved) ? saved : 600
+        var components = DateComponents(hour: minutes / 60, minute: minutes % 60, second: 0)
+        if frequency == "weekly" { components.weekday = weekday(defaults: defaults) }
         return calendar.nextDate(after: now,
-            matching: DateComponents(hour: minutes / 60, minute: minutes % 60, second: 0),
+            matching: components,
             matchingPolicy: .nextTime, repeatedTimePolicy: .first)
             ?? now.addingTimeInterval(6 * 60 * 60)
     }
@@ -53,7 +69,8 @@ SCHEDULE_UI = r'''
 private struct AutomaticRefreshScheduleView: View
 {
     @State private var enabled = UserDefaults.standard.isBackgroundRefreshEnabled
-    @AppStorage(AutomaticRefreshSchedule.dailyKey) private var daily = false
+    @State private var frequency = AutomaticRefreshSchedule.frequency()
+    @AppStorage(AutomaticRefreshSchedule.weekdayKey) private var weekday = 2
     @AppStorage(AutomaticRefreshSchedule.minutesKey) private var minutes = 600
     @State private var errorMessage: String?
     @State private var pendingDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
@@ -75,12 +92,24 @@ private struct AutomaticRefreshScheduleView: View
         Form {
             Section {
                 Toggle("Background Refresh", isOn: $enabled)
-                Picker("Schedule", selection: $daily) {
-                    Text("Every Six Hours").tag(false)
-                    Text("Daily").tag(true)
+                Picker("Schedule", selection: $frequency) {
+                    Text("Every Six Hours").tag("interval")
+                    Text("Daily").tag("daily")
+                    Text("Weekly").tag("weekly")
                 }
                 .disabled(!enabled)
-                if daily {
+                if frequency == "weekly" {
+                    Picker("Day", selection: $weekday) {
+                        ForEach(0..<7, id: \.self) { offset in
+                            let day = (Calendar.current.firstWeekday - 1 + offset) % 7 + 1
+                            Text(Calendar.current.weekdaySymbols[day - 1]).tag(day)
+                        }
+                    }
+                    .disabled(!enabled)
+                    Label("Weekly refresh may run after free-account apps expire.", systemImage: "exclamationmark.triangle")
+                        .foregroundColor(.secondary)
+                }
+                if frequency != "interval" {
                     DatePicker("Preferred Time", selection: time, displayedComponents: .hourAndMinute)
                         .disabled(!enabled)
                 }
@@ -106,7 +135,11 @@ private struct AutomaticRefreshScheduleView: View
         .navigationTitle("Refresh Schedule")
         .onAppear { reschedule(replacePending: false) }
         .onChange(of: enabled) { _ in save() }
-        .onChange(of: daily) { _ in save() }
+        .onChange(of: frequency) { value in
+            UserDefaults.standard.set(value, forKey: AutomaticRefreshSchedule.frequencyKey)
+            save()
+        }
+        .onChange(of: weekday) { _ in save() }
         .onChange(of: minutes) { _ in save() }
         .onChange(of: scenePhase) { phase in
             if phase == .active {

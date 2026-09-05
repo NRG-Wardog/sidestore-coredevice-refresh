@@ -78,6 +78,41 @@ defaults.set(90, forKey: AutomaticRefreshSchedule.minutesKey)
 calendar.timeZone = TimeZone(identifier: "America/New_York")!
 precondition(AutomaticRefreshSchedule.requestDate(after: date("2026-01-02T00:00:00Z"), replacePending: false,
     defaults: defaults, calendar: calendar) == date("2026-01-02T06:30:00Z"))
+// Legacy daily preferences survive upgrade; explicit choices override them.
+precondition(AutomaticRefreshSchedule.frequency(defaults: defaults) == "daily")
+defaults.set("weekly", forKey: AutomaticRefreshSchedule.frequencyKey)
+defaults.set(600, forKey: AutomaticRefreshSchedule.minutesKey)
+expect("2026-01-01T13:00:00Z", "2026-01-05T15:00:00Z")
+expect("2026-01-05T14:59:00Z", "2026-01-05T15:00:00Z")
+expect("2026-01-05T15:00:00Z", "2026-01-12T15:00:00Z")
+// Sunday and Saturday retain Calendar's weekday numbering in every locale.
+defaults.set(1, forKey: AutomaticRefreshSchedule.weekdayKey)
+expect("2026-01-01T13:00:00Z", "2026-01-04T15:00:00Z")
+defaults.set(7, forKey: AutomaticRefreshSchedule.weekdayKey)
+expect("2026-01-01T13:00:00Z", "2026-01-03T15:00:00Z")
+defaults.set(0, forKey: AutomaticRefreshSchedule.weekdayKey)
+expect("2026-01-01T13:00:00Z", "2026-01-05T15:00:00Z")
+defaults.set(8, forKey: AutomaticRefreshSchedule.weekdayKey)
+expect("2026-01-01T13:00:00Z", "2026-01-05T15:00:00Z")
+defaults.set(1, forKey: AutomaticRefreshSchedule.weekdayKey)
+defaults.set(150, forKey: AutomaticRefreshSchedule.minutesKey)
+expect("2026-03-08T05:00:00Z", "2026-03-08T07:00:00Z")
+defaults.set(90, forKey: AutomaticRefreshSchedule.minutesKey)
+expect("2026-11-01T04:00:00Z", "2026-11-01T05:30:00Z")
+expect("2026-11-01T05:30:00Z", "2026-11-08T06:30:00Z")
+// A changed weekday invalidates a previously accepted weekly request.
+defaults.set(date("2026-01-04T06:30:00Z"), forKey: AutomaticRefreshSchedule.pendingKey)
+defaults.set(AutomaticRefreshSchedule.configuration(defaults: defaults, calendar: calendar),
+             forKey: AutomaticRefreshSchedule.configurationKey)
+defaults.set(2, forKey: AutomaticRefreshSchedule.weekdayKey)
+precondition(AutomaticRefreshSchedule.requestDate(after: date("2026-01-01T00:00:00Z"), replacePending: false,
+    defaults: defaults, calendar: calendar) == date("2026-01-05T06:30:00Z"))
+defaults.set("daily", forKey: AutomaticRefreshSchedule.frequencyKey)
+expect("2026-01-01T00:00:00Z", "2026-01-01T06:30:00Z")
+defaults.set("interval", forKey: AutomaticRefreshSchedule.frequencyKey)
+expect("2026-01-01T00:00:00Z", "2026-01-01T06:00:00Z")
+defaults.set("invalid", forKey: AutomaticRefreshSchedule.frequencyKey)
+precondition(AutomaticRefreshSchedule.frequency(defaults: defaults) == "daily")
 print("Schedule date tests passed")
 ''', encoding="utf-8")
             binary = Path(directory) / "schedule-tests"
@@ -179,7 +214,8 @@ final class Delegate {
 ''' + delegate[start:end] + r'''
 }
 let defaults = UserDefaults.standard
-let keys = ["testEnabled", AutomaticRefreshSchedule.pendingKey, AutomaticRefreshSchedule.configurationKey,
+let keys = ["testEnabled", AutomaticRefreshSchedule.frequencyKey, AutomaticRefreshSchedule.weekdayKey,
+            AutomaticRefreshSchedule.pendingKey, AutomaticRefreshSchedule.configurationKey,
             AutomaticRefreshSchedule.dailyKey, AutomaticRefreshSchedule.minutesKey]
 for key in keys { defaults.removeObject(forKey: key) }
 defer { for key in keys { defaults.removeObject(forKey: key) } }

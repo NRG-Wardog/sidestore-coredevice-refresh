@@ -93,9 +93,15 @@ com.SideStore.SideStore.automatic-refresh
 
 Settings > Refreshing Apps > Refresh Schedule controls the native schedule.
 Background Refresh can be enabled or disabled there. Choose Every Six Hours
-(the existing default), or Daily and a preferred local time. Daily initially
-shows 10:00. Changes are saved immediately and replace the pending request.
+(the existing default), Daily with a preferred local time, or Weekly with a
+weekday and time. The initial time is 10:00 and the initial weekly day is
+Monday. Weekdays follow the device's language and first-day-of-week setting.
+Existing daily preferences and selected times survive an upgrade.
+Changes are saved immediately and replace the pending request.
 Disabling Background Refresh cancels that request.
+
+Weekly refresh leaves little margin before free-account apps expire, and iOS
+may delay execution beyond that point. The schedule screen displays this risk.
 
 The screen shows the earliest eligible date accepted by iOS, submission errors
 with a retry action, and whether system Background App Refresh is unavailable.
