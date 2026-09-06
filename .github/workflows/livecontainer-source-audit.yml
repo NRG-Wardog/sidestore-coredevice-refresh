@@ -1,0 +1,50 @@
+name: LiveContainer source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/livecontainer-autorefresh]
+    paths: [.github/workflows/livecontainer-source-audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sources/builder
+          persist-credentials: false
+      - name: Fetch pinned public sources (no iOS build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          clone_pin() {
+            local repo="$1" ref="$2" dir="$3"
+            git init -q "$dir"
+            git -C "$dir" remote add origin "https://github.com/$repo.git"
+            git -C "$dir" fetch -q --depth=1 origin "$ref"
+            git -C "$dir" checkout -q --detach FETCH_HEAD
+            test "$(git -C "$dir" rev-parse HEAD)" = "$ref"
+            git -C "$dir" submodule update --init --recursive --depth=1
+          }
+          clone_pin LiveContainer/LiveContainer 12377cf3b91d51739a33f14a302e5f522b238593 sources/LiveContainer
+          clone_pin LiveContainer/SideStore 10ffa01ecdfe4203a7ad5d7f41c0d5de03bd8abb sources/SideStore
+          clone_pin SideStore/SideStore 394bb4eb331cb4afc23517af2fc847ec103af57f sources/Standalone
+          clone_pin SideStore/idevice ebd7dadfc55d1c4facee3d11ecf5b28e20548b57 sources/idevice
+          clone_pin SideStore/jktcp e674e1eee6d5943e13b1eba0bd24a9dd0b2fa020 sources/jktcp
+          for dir in sources/*; do
+            echo "$dir $(git -C "$dir" rev-parse HEAD)"
+            git -C "$dir" submodule status --recursive
+          done > sources/revisions.txt
+          tar --exclude=.git -czf livecontainer-sources.tar.gz sources
+      - uses: actions/upload-artifact@v4
+        with:
+          name: livecontainer-pinned-sources
+          path: livecontainer-sources.tar.gz
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
