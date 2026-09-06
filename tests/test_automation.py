@@ -34,6 +34,7 @@ class AutomationTests(unittest.TestCase):
         self.assertIn("SIDESTORE_REFRESH_ATTEMPT_STARTED", source)
         self.assertIn("SIDESTORE_REFRESH_RESULT", source)
         self.assertIn("APP_DIAGNOSTIC", source)
+        self.assertIn("history = AutomaticRefreshHistory.load()\n            pendingDate = UserDefaults.standard.object", source)
 
         def select(apps):
             normal = [app for app in apps if not app["sidestore"] and app["active"]

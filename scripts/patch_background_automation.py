@@ -339,7 +339,11 @@ private struct AutomaticRefreshScheduleView: View
         .confirmationDialog("Clear refresh history?", isPresented: $showingClearHistory, titleVisibility: .visible) {
             SwiftUI.Button("Clear History", role: .destructive) { AutomaticRefreshHistory.clear() }
         }
-        .onAppear { reschedule(replacePending: false) }
+        .onAppear {
+            history = AutomaticRefreshHistory.load()
+            pendingDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
+            reschedule(replacePending: false)
+        }
         .onChange(of: enabled) { _ in save() }
         .onChange(of: frequency) { value in
             UserDefaults.standard.set(value, forKey: AutomaticRefreshSchedule.frequencyKey)
