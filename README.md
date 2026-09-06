@@ -113,29 +113,21 @@ The current implementation discovers and validates this same-subnet `/32` peer r
 
 ## Screenshots
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/settings-refreshing-apps.jpg" width="360" alt="SideStore Refreshing Apps settings">
-  <br>
-  <strong>Refreshing Apps settings</strong>
-</p>
+### Refreshing Apps settings
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-main.jpg" width="360" alt="SideStore Refresh Schedule">
-  <br>
-  <strong>Refresh Schedule</strong>
-</p>
+![SideStore Refreshing Apps settings](docs/screenshots/settings-refreshing-apps.jpg)
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-options.jpg" width="360" alt="Six-hour, daily, and weekly refresh schedule options">
-  <br>
-  <strong>Six-hour, daily, or weekly</strong>
-</p>
+### Refresh Schedule
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-history.jpg" width="360" alt="SideStore refresh history">
-  <br>
-  <strong>Persistent refresh history</strong>
-</p>
+![SideStore Refresh Schedule](docs/screenshots/refresh-schedule-main.jpg)
+
+### Six-hour, daily, or weekly
+
+![Six-hour, daily, and weekly refresh schedule options](docs/screenshots/refresh-schedule-options.jpg)
+
+### Persistent refresh history
+
+![SideStore refresh history](docs/screenshots/refresh-history.jpg)
 
 These screens show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, and persisted manual refresh results.
 
