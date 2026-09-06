@@ -692,7 +692,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
                 let eligibleIDs = Set(eligibleApps.map {{ $0.bundleIdentifier }})
 
                 for app in allApps {{
-                    let isSideStore = app.bundleIdentifier == StoreApp.altStoreAppID
+                    let isSideStore = app.bundleIdentifier == StoreApp.altstoreAppID
                     let oldEnough = app.refreshedDate < threshold
                     let pledgeEligible = app.storeApp == nil || !app.storeApp!.isPledgeRequired || app.storeApp!.isPledged
                     let activeEligible = isSideStore || app.isActive
@@ -741,20 +741,20 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
                                 return false
                             }}
                         }}
+                        for (bundleIdentifier, nestedResult) in results.sorted(by: {{ $0.key < $1.key }}) {{
+                            switch nestedResult {{
+                            case .success:
+                                debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=success")
+                            case .failure(let error):
+                                debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=failure error=\\(error.localizedDescription)")
+                            }}
+                        }}
                     case .failure(let error):
                         resultCount = 0
                         success = false
                         failureDetail = error.localizedDescription
                     }}
 
-                for (bundleIdentifier, nestedResult) in results.sorted(by: {{ $0.key < $1.key }}) {{
-                    switch nestedResult {{
-                    case .success:
-                        debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=success")
-                    case .failure(let error):
-                        debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=failure error=\\(error.localizedDescription)")
-                    }}
-                }}
                 debugLog("[AUTO_REFRESH] REFRESH_COMPLETE success=\\(success) result_count=\\(resultCount)")
                     state.finish(success: success,
                         event: success && resultCount == 0 ? .skipped : nil,
