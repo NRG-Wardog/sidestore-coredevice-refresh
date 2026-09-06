@@ -17,6 +17,7 @@ REQUIRED_SCRIPTS = {
     "patch_background_automation.py",
     "patch_local_idevice_package.py",
 }
+LIVE_CONTAINER_SCRIPT = "patch_livecontainer_autorefresh.py"
 
 
 class RepositoryTests(unittest.TestCase):
@@ -29,11 +30,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(WORKFLOW.is_file())
         self.assertEqual(
             {path.name for path in SCRIPTS.glob("*.py")},
-            REQUIRED_SCRIPTS,
+            REQUIRED_SCRIPTS | {LIVE_CONTAINER_SCRIPT},
         )
 
     def test_patch_scripts_parse_and_are_idempotent(self):
-        for name in REQUIRED_SCRIPTS:
+        for name in REQUIRED_SCRIPTS | {LIVE_CONTAINER_SCRIPT}:
             path = SCRIPTS / name
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         self.assertIn(
