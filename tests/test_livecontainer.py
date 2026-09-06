@@ -23,6 +23,9 @@ class LiveContainerPatchTests(unittest.TestCase):
             "LiveContainerRefreshBridge",
             "requiresNetworkConnectivity = true",
             "liveContainerAutoRefreshFrequency",
+            "liveContainerAutoRefreshHistory",
+            "Refresh SideStore now",
+            "MANUAL_COMPLETE",
             "BGTaskSchedulerPermittedIdentifiers",
             "SideStoreSupport.framework in Frameworks",
         ):

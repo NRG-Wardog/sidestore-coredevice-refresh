@@ -57,6 +57,21 @@ private enum LiveContainerAutoRefreshScheduler {{
     static let minutesKey = "liveContainerAutoRefreshMinutes"
     static let lastResultKey = "liveContainerAutoRefreshLastResult"
     static let lastDateKey = "liveContainerAutoRefreshLastDate"
+    static let historyKey = "liveContainerAutoRefreshHistory"
+
+    private static func record(source: String, result: String, detail: String = "") {{
+        let entry: [String: String] = [
+            "date": ISO8601DateFormatter().string(from: Date()),
+            "source": source,
+            "result": result,
+            "detail": String(detail.prefix(300))
+        ]
+        var history = defaults.array(forKey: historyKey) as? [[String: String]] ?? []
+        history.insert(entry, at: 0)
+        defaults.set(Array(history.prefix(50)), forKey: historyKey)
+        defaults.set(result, forKey: lastResultKey)
+        defaults.set(Date(), forKey: lastDateKey)
+    }}
 
     static func register() {{
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) {{ task in
@@ -65,13 +80,11 @@ private enum LiveContainerAutoRefreshScheduler {{
                 do {{
                     print("[LIVE_CONTAINER_REFRESH] TASK_START")
                     try await LiveContainerRefreshBridge.refreshAllApps()
-                    defaults.set("success", forKey: lastResultKey)
-                    defaults.set(Date(), forKey: lastDateKey)
+                    record(source: "scheduled", result: "success")
                     print("[LIVE_CONTAINER_REFRESH] TASK_COMPLETE success=true")
                     task.setTaskCompleted(success: true)
                 }} catch {{
-                    defaults.set("failure", forKey: lastResultKey)
-                    defaults.set(Date(), forKey: lastDateKey)
+                    record(source: "scheduled", result: "failure", detail: error.localizedDescription)
                     print("[LIVE_CONTAINER_REFRESH] TASK_COMPLETE success=false error=\\(error.localizedDescription)")
                     task.setTaskCompleted(success: false)
                 }}
@@ -82,6 +95,20 @@ private enum LiveContainerAutoRefreshScheduler {{
             }}
         }}
         print("{MARKER}")
+    }}
+
+    static func runNow() {{
+        Task {{
+            do {{
+                print("[LIVE_CONTAINER_REFRESH] MANUAL_START")
+                try await LiveContainerRefreshBridge.refreshAllApps()
+                record(source: "manual", result: "success")
+                print("[LIVE_CONTAINER_REFRESH] MANUAL_COMPLETE success=true")
+            }} catch {{
+                record(source: "manual", result: "failure", detail: error.localizedDescription)
+                print("[LIVE_CONTAINER_REFRESH] MANUAL_COMPLETE success=false error=\\(error.localizedDescription)")
+            }}
+        }}
     }}
 
     static func schedule() {{
@@ -123,6 +150,7 @@ import SwiftUI
 
 struct LCEmbeddedSideStoreRefreshView: View {
     private let defaults = UserDefaults(suiteName: "group.com.SideStore.SideStore") ?? .standard
+    @State private var history: [[String: String]] = []
     @AppStorage("liveContainerAutoRefreshEnabled", store: UserDefaults(suiteName: "group.com.SideStore.SideStore")) private var enabled = false
     @AppStorage("liveContainerAutoRefreshFrequency", store: UserDefaults(suiteName: "group.com.SideStore.SideStore")) private var frequency = "interval"
     @AppStorage("liveContainerAutoRefreshWeekday", store: UserDefaults(suiteName: "group.com.SideStore.SideStore")) private var weekday = 2
@@ -146,6 +174,7 @@ struct LCEmbeddedSideStoreRefreshView: View {
                     enabled = $0
                     notifyScheduleChanged()
                 }))
+                Button("Refresh SideStore now", action: notifyManualRefresh)
                 Picker("Frequency", selection: Binding(get: { frequency }, set: {
                     frequency = $0
                     notifyScheduleChanged()
@@ -179,12 +208,35 @@ struct LCEmbeddedSideStoreRefreshView: View {
                     }
                 }
             }
+            Section("History") {
+                if history.isEmpty {
+                    Text("No refreshes recorded")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(Array(history.prefix(20).enumerated()), id: \.offset) { _, entry in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(entry["source"]?.capitalized ?? "Unknown") - \(entry["result"]?.capitalized ?? "Unknown")")
+                            Text(entry["date"] ?? "")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            if let detail = entry["detail"], !detail.isEmpty {
+                                Text(detail).font(.caption2).foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .navigationTitle("SideStore refresh")
+        .onAppear { history = defaults.array(forKey: "liveContainerAutoRefreshHistory") as? [[String: String]] ?? [] }
     }
 
     private func notifyScheduleChanged() {
         NotificationCenter.default.post(name: Notification.Name("LiveContainerAutoRefreshScheduleChanged"), object: nil)
+    }
+
+    private func notifyManualRefresh() {
+        NotificationCenter.default.post(name: Notification.Name("LiveContainerAutoRefreshRunNow"), object: nil)
     }
 }
 '''
@@ -204,7 +256,7 @@ def patch_host_delegate(root: Path) -> None:
     if "import BackgroundTasks" not in text:
         text = replace_once(text, "import Intents\n", "import Intents\nimport BackgroundTasks\nimport SideStoreSupport\n", "host imports")
     if "LiveContainerAutoRefreshScheduler.register()" not in text:
-        text = replace_once(text, "        application.shortcutItems = nil\n", "        application.shortcutItems = nil\n        LiveContainerAutoRefreshScheduler.register()\n        LiveContainerAutoRefreshScheduler.schedule()\n        NotificationCenter.default.addObserver(forName: Notification.Name(\"LiveContainerAutoRefreshScheduleChanged\"), object: nil, queue: .main) { _ in\n            LiveContainerAutoRefreshScheduler.schedule()\n        }\n", "host scheduler startup")
+        text = replace_once(text, "        application.shortcutItems = nil\n", "        application.shortcutItems = nil\n        LiveContainerAutoRefreshScheduler.register()\n        LiveContainerAutoRefreshScheduler.schedule()\n        NotificationCenter.default.addObserver(forName: Notification.Name(\"LiveContainerAutoRefreshScheduleChanged\"), object: nil, queue: .main) { _ in\n            LiveContainerAutoRefreshScheduler.schedule()\n        }\n        NotificationCenter.default.addObserver(forName: Notification.Name(\"LiveContainerAutoRefreshRunNow\"), object: nil, queue: .main) { _ in\n            LiveContainerAutoRefreshScheduler.runNow()\n        }\n", "host scheduler startup")
         text = replace_once(text, "    func application(_ application: UIApplication, configurationForConnecting", "    func applicationDidEnterBackground(_ application: UIApplication) {\n        LiveContainerAutoRefreshScheduler.schedule()\n    }\n\n    func application(_ application: UIApplication, configurationForConnecting", "host background reschedule")
         text = replace_once(text, "class SceneDelegate:", HOST_SCHEDULER + "\nclass SceneDelegate:", "host scheduler implementation")
     path.write_text(text, encoding="utf-8")
@@ -264,8 +316,16 @@ def verify(root: Path) -> None:
         (delegate, "LiveContainerRefreshBridge.refreshAllApps", "host refresh bridge"),
         (delegate, "requiresNetworkConnectivity = true", "network requirement"),
         (delegate, "TASK_COMPLETE success=true", "success diagnostics"),
+        (delegate, "LiveContainerAutoRefreshScheduler.runNow()", "manual refresh dispatch"),
         (support, "public enum LiveContainerRefreshBridge", "public bridge"),
+        (support, "RefreshHandler.shared.startRefresh", "embedded SideStore refresh"),
         (settings, "liveContainerAutoRefreshFrequency", "schedule persistence"),
+        (settings, "Refresh SideStore now", "manual refresh control"),
+        (settings, "LiveContainerAutoRefreshRunNow", "manual refresh notification"),
+        (delegate, "record(source: \"scheduled\"", "scheduled history"),
+        (delegate, "record(source: \"manual\"", "manual history"),
+        (delegate, "liveContainerAutoRefreshHistory", "history persistence"),
+        (delegate, "MANUAL_COMPLETE", "manual diagnostics"),
         (info, TASK_ID, "permitted task identifier"),
         (project, "A17ECAFE2DCA000000000001", "host framework link"),
     ]

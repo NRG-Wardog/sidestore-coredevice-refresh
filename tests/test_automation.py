@@ -139,7 +139,7 @@ print("Schedule date tests passed")
             for patch in functions:
                 patch(root)
             self.assertEqual(first, {name: (root / name).read_bytes() for name in FILES})
-            manager = (root / "AltStore/Managing Apps/AppManager.swift").read_text()
+            manager = (root / "AltStore/Managing Apps/AppManager.swift").read_text(encoding="utf-8")
             section = manager[manager.index("    func refresh(_ installedApps:"):manager.index("    func activate(")]
             self.assertIn("recordManualHistory: Bool = true", section)
             self.assertLess(section.index("try await self.pipelineRunner.perform"),
