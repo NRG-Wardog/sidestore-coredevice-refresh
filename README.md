@@ -113,23 +113,36 @@ The current implementation discovers and validates this same-subnet `/32` peer r
 
 ## Screenshots
 
-### Refreshing Apps settings
+The previous JPG screenshots were removed from this README because they were corrupted during storage/upload and rendered as partial images with gray blocks.
 
-![SideStore Refreshing Apps settings](docs/screenshots/settings-refreshing-apps.jpg)
+Regenerate and commit clean PNG screenshots using these exact paths:
+
+```text
+docs/screenshots/settings-refreshing-apps.png
+docs/screenshots/refresh-schedule-main.png
+docs/screenshots/refresh-schedule-options.png
+docs/screenshots/refresh-history.png
+```
+
+After the PNG files are committed, restore the image embeds as:
+
+```md
+### Refreshing Apps settings
+![SideStore Refreshing Apps settings](docs/screenshots/settings-refreshing-apps.png)
 
 ### Refresh Schedule
-
-![SideStore Refresh Schedule](docs/screenshots/refresh-schedule-main.jpg)
+![SideStore Refresh Schedule](docs/screenshots/refresh-schedule-main.png)
 
 ### Six-hour, daily, or weekly
-
-![Six-hour, daily, and weekly refresh schedule options](docs/screenshots/refresh-schedule-options.jpg)
+![Six-hour, daily, and weekly refresh schedule options](docs/screenshots/refresh-schedule-options.png)
 
 ### Persistent refresh history
+![SideStore refresh history](docs/screenshots/refresh-history.png)
+```
 
-![SideStore refresh history](docs/screenshots/refresh-history.jpg)
+Do not convert the corrupted JPG files to PNG. Capture or export new screenshots directly as PNG.
 
-These screens show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, and persisted manual refresh results.
+These screens should show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, and persisted manual refresh results.
 
 ## Why this exists
 
