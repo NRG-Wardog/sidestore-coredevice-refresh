@@ -137,7 +137,19 @@ The current implementation discovers and validates this same-subnet `/32` peer r
   <strong>Persistent refresh history</strong>
 </p>
 
-These screens show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, and persisted manual refresh results.
+<p align="center">
+  <img src="docs/screenshots/refresh-preferred-time-picker.png" width="240" alt="SideStore preferred refresh time picker">
+  <br>
+  <strong>Preferred refresh time picker</strong>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/siri-refresh-phrase.png" width="240" alt="Siri phrase for SideStore refresh">
+  <br>
+  <strong>Siri refresh phrase</strong>
+</p>
+
+These screens show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, persisted manual refresh results, preferred refresh time selection, and the Siri shortcut phrase used to trigger refresh.
 
 ## Why this exists
 
