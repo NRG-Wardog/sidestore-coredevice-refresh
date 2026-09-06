@@ -55,17 +55,17 @@ material.
 
 ## Current release IPA
 
-The public **v1.0.1** IPA is **27,556,060 bytes** with SHA-256:
+The public **v1.0.2** IPA is **27,566,058 bytes** with SHA-256:
 
 ```text
-ec0fe6109abd92326bda695aafc95c2e19d6e8bd96e912f0030acf46e72dedd4
+120ba06c51d4d235743451b065968dc94f7c7374cacb955827860254e01b5a76
 ```
 
 Release provenance:
 
 ```text
-builder_commit=395d21310dd4a9d0ba71a46739ff5c1d47a862bf
-GitHub Actions run=34035803756
+builder_commit=f33487d473e09620493d2a8d82e8e37c9bdef32b
+GitHub Actions run=34045788967
 verification=PASS
 ```
 
