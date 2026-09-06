@@ -77,6 +77,7 @@ private enum LiveContainerAutoRefreshScheduler {{
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) {{ task in
             guard let task = task as? BGProcessingTask else {{ return }}
             let operation = Task {{
+                defer {{ schedule() }}
                 do {{
                     print("[LIVE_CONTAINER_REFRESH] TASK_START")
                     try await LiveContainerRefreshBridge.refreshAllApps()
@@ -91,7 +92,9 @@ private enum LiveContainerAutoRefreshScheduler {{
             }}
             task.expirationHandler = {{
                 operation.cancel()
+                record(source: "scheduled", result: "expired", detail: "BGTask expiration")
                 print("[LIVE_CONTAINER_REFRESH] TASK_EXPIRED")
+                task.setTaskCompleted(success: false)
             }}
         }}
         print("{MARKER}")
@@ -316,6 +319,9 @@ def verify(root: Path) -> None:
         (delegate, "LiveContainerRefreshBridge.refreshAllApps", "host refresh bridge"),
         (delegate, "requiresNetworkConnectivity = true", "network requirement"),
         (delegate, "TASK_COMPLETE success=true", "success diagnostics"),
+        (delegate, "defer { schedule() }", "scheduled resubmission"),
+        (delegate, "task.setTaskCompleted(success: false)", "expiration completion"),
+        (delegate, "result: \"expired\"", "expiration history"),
         (delegate, "LiveContainerAutoRefreshScheduler.runNow()", "manual refresh dispatch"),
         (support, "public enum LiveContainerRefreshBridge", "public bridge"),
         (support, "RefreshHandler.shared.startRefresh", "embedded SideStore refresh"),
