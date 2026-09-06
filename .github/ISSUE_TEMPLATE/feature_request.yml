@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused improvement to the builder, transport, verification, or UX
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete problem does this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest practical change that solves the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / references
+      description: Add relevant upstream source, device behavior, logs, or documentation. Do not include sensitive signing or pairing material.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This request is compatible with the current LocalDevVPN → Lockdown → CoreDeviceProxy → CDTunnel → RSD transport objective, or explains why that objective should change.
+          required: true
