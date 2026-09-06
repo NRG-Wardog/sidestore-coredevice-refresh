@@ -59,6 +59,8 @@ jobs:
           swiftc -frontend -parse work/EmbeddedSideStore/SideStore/Utils/iostreams/ConsoleLog.swift
           plutil -extract BGTaskSchedulerPermittedIdentifiers.0 raw work/LiveContainer/LiveContainer/Info.plist
           xcodebuild -list -project work/LiveContainer/LiveContainer.xcodeproj
+          rm -rf "$HOME/Library/Caches/org.swift.swiftpm/artifacts/https___github_com_krzyzanowskim_OpenSSL_releases_download_3_6_2000_OpenSSL_xcframework_zip"
+          rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*/SourcePackages/artifacts/openssl
           xcodebuild -list -project work/EmbeddedSideStore/AltStore.xcodeproj
           grep -Fq 'LIVE_REFRESH_LOG_RETENTION_V1' work/EmbeddedSideStore/SideStore/Utils/iostreams/ConsoleLog.swift
 
