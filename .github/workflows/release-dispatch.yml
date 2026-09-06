@@ -1,0 +1,24 @@
+name: Dispatch Release Build
+
+on:
+  push:
+    branches:
+      - 'release/**'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch current SideStore build for this release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run build-current.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${RELEASE_REF}"
