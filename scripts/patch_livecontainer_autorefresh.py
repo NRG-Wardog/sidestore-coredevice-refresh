@@ -279,10 +279,12 @@ def patch_host_info(root: Path) -> None:
 def patch_project(root: Path) -> None:
     path = root / "LiveContainer.xcodeproj" / "project.pbxproj"
     text = path.read_text(encoding="utf-8")
-    build_marker = "173545AF2E2C7913001B3B4C /* SideStoreSupport.framework in Embed Frameworks */"
     if "SideStoreSupport.framework in Frameworks" not in text:
-        text = replace_once(text, "/* Begin PBXBuildFile section */\n", "/* Begin PBXBuildFile section */\n\tA17ECAFE2DCA000000000001 = {isa = PBXBuildFile; fileRef = 173545A82E2C7913001B3B4C /* SideStoreSupport.framework */; };\n", "host framework link build file")
+        text = replace_once(text, "/* Begin PBXBuildFile section */\n", "/* Begin PBXBuildFile section */\n\tA17ECAFE2DCA000000000001 = {isa = PBXBuildFile; fileRef = 173545A82E2C7913001B3B4C /* SideStoreSupport.framework */; };\n\tA17ECAFE2DCA000000000002 = {isa = PBXBuildFile; fileRef = 173545A82E2C7913001B3B4C /* SideStoreSupport.framework */; };\n", "host framework link build file")
         text = replace_once(text, "17554B6A2DA165D8004C6D90 /* Frameworks */ = {\n\t\t\tisa = PBXFrameworksBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n\t\t\t);", "17554B6A2DA165D8004C6D90 /* Frameworks */ = {\n\t\t\tisa = PBXFrameworksBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n\t\t\t\tA17ECAFE2DCA000000000001 /* SideStoreSupport.framework in Frameworks */,\n\t\t\t);", "host framework link phase")
+        text = replace_once(text, "17413FB22D9C0BAE00F3F928 /* Frameworks */ = {\n\t\t\tisa = PBXFrameworksBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n", "17413FB22D9C0BAE00F3F928 /* Frameworks */ = {\n\t\t\tisa = PBXFrameworksBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n\t\t\t\tA17ECAFE2DCA000000000002 /* SideStoreSupport.framework in Frameworks */,\n", "host SwiftUI framework link phase")
+        text = replace_once(text, "/* Begin PBXTargetDependency section */\n", "/* Begin PBXTargetDependency section */\n\tA17ECAFE2DCA000000000003 = {isa = PBXTargetDependency; target = 173545A72E2C7913001B3B4C /* SideStoreSupport */; targetProxy = 173545AC2E2C7913001B3B4C /* PBXContainerItemProxy */; };\n", "host SwiftUI target dependency")
+        text = replace_once(text, "\t\t\tdependencies = (\n\t\t\t);\n\t\t\tfileSystemSynchronizedGroups = (\n\t\t\t\t17413FB62D9C0BAE00F3F928 /* LiveContainerSwiftUI */", "\t\t\tdependencies = (\n\t\t\t\tA17ECAFE2DCA000000000003 /* PBXTargetDependency */,\n\t\t\t);\n\t\t\tfileSystemSynchronizedGroups = (\n\t\t\t\t17413FB62D9C0BAE00F3F928 /* LiveContainerSwiftUI */", "host SwiftUI target dependency list")
         path.write_text(text, encoding="utf-8")
 
 
@@ -334,6 +336,8 @@ def verify(root: Path) -> None:
         (delegate, "MANUAL_COMPLETE", "manual diagnostics"),
         (info, TASK_ID, "permitted task identifier"),
         (project, "A17ECAFE2DCA000000000001", "host framework link"),
+        (project, "A17ECAFE2DCA000000000002", "host SwiftUI framework link"),
+        (project, "A17ECAFE2DCA000000000003", "host SwiftUI target dependency"),
     ]
     missing = [label for content, needle, label in required if needle not in content]
     if missing:
