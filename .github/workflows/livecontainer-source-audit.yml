@@ -36,11 +36,12 @@ jobs:
           clone_pin SideStore/SideStore 394bb4eb331cb4afc23517af2fc847ec103af57f sources/Standalone
           clone_pin SideStore/idevice ebd7dadfc55d1c4facee3d11ecf5b28e20548b57 sources/idevice
           clone_pin SideStore/jktcp e674e1eee6d5943e13b1eba0bd24a9dd0b2fa020 sources/jktcp
-          for dir in sources/*; do
+          clone_pin LiveContainer/dylibify 5daf713df9fb07724510490c88aa8e00061be14a sources/dylibify
+          for dir in sources/*/; do
             echo "$dir $(git -C "$dir" rev-parse HEAD)"
             git -C "$dir" submodule status --recursive
           done > sources/revisions.txt
-          tar --exclude=.git -czf livecontainer-sources.tar.gz sources
+          tar --exclude=.git --exclude=OpenSSL -czf livecontainer-sources.tar.gz sources
       - uses: actions/upload-artifact@v4
         with:
           name: livecontainer-pinned-sources
