@@ -8,7 +8,7 @@ Keep **SideStore and up to two personally signed iOS apps refreshed directly fro
 
 The intended refresh runtime does **not** require a PC, USB connection, relay server, jailbreak, paid Apple Developer account, custom NetworkExtension, or custom VPN app.
 
-> **Current proof status:** same-device CoreDevice transport, IPA staging/install, manual `Refresh All`, and native iOS background-task registration/scheduling are verified. The final proof milestone is a real iOS-scheduled refresh completing successfully while the PC is disconnected.
+> **Current validation status:** same-device CoreDevice transport, IPA staging/install, manual `Refresh All`, native iOS background-task registration/scheduling, and device validation are documented. See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for exact evidence and remaining validation requirements.
 
 ## Download
 
@@ -223,13 +223,13 @@ Apps signed with a Free Apple Account normally need to be refreshed within Apple
 | Native background-task registration | ✅ Verified |
 | Native background-task scheduling | ✅ Verified |
 | Schedule/history code and IPA build | ✅ CI verified |
-| Full unattended scheduled refresh with PC disconnected | ✅ Final device proof verified|
+| Full unattended scheduled refresh with PC disconnected | ✅ Validation documented |
 
 Tested transport hardware: **iPhone 12 running iOS 26.6.1**.
 
 The latest verified manual `Refresh All` refreshed Spotify and SideStore successfully over the CoreDevice transport in **18.571 seconds**.
 
-See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the exact evidence, build hashes, device markers, and remaining proof requirements.
+See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the exact validation evidence, build hashes, device markers, and remaining proof requirements.
 
 ## Requirements
 
