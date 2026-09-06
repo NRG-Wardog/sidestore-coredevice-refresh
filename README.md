@@ -1,151 +1,205 @@
-# SideStore CoreDevice Self-Refresh Builder
+# SideStore Auto-Refresh — On-Device, No PC at Runtime
 
 [![Build Current SideStore](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/workflows/build-current.yml/badge.svg)](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/workflows/build-current.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This repository builds a modified SideStore that can refresh and install apps
-over the same iPhone's official App Store LocalDevVPN connection. The final
-runtime does not require a PC, USB, relay server, jailbreak, paid Apple
-Developer account, custom NetworkExtension, or custom VPN application.
+Keep **SideStore and up to two personally signed iOS apps refreshed directly from the iPhone** with a Free Apple Account, the official App Store **LocalDevVPN**, and Apple's CoreDevice stack.
 
-With a Free Apple Account / Personal Team, SideStore can keep itself and two
-personally signed apps refreshed on the same iPhone through recurring refresh
-automation, avoiding the normal seven-day interruption as long as the device
-can run the scheduled refresh and the account remains valid.
+The intended refresh runtime does **not** require a PC, USB connection, relay server, jailbreak, paid Apple Developer account, custom NetworkExtension, or custom VPN app.
 
-The user still needs a Free Apple Account / Personal Team, a valid pairing
-file, Developer Mode, Wi-Fi, and the unmodified LocalDevVPN App Store app.
+> **Current proof status:** same-device CoreDevice transport, IPA staging/install, manual `Refresh All`, and native iOS background-task registration/scheduling are verified. The final proof milestone is a real iOS-scheduled refresh completing successfully while the PC is disconnected.
 
-## Current Transport
+## Why this exists
 
-The current path is:
+Apps signed with a Free Apple Account normally need to be refreshed within Apple's seven-day signing window. This project modifies SideStore so the refresh/install path can run over the iPhone's own LocalDevVPN/CoreDevice connection instead of depending on a computer during normal refresh operation.
 
-```text
-LocalDevVPN / same-subnet /32 route
-    -> Lockdown on the device peer at port 62078
-    -> CoreDeviceProxy over TLS
-    -> CDTunnel
-    -> jktcp userspace IPv6 adapter
-    -> RSD
-    -> AFC and InstallationProxy
-```
+### What you get
 
-The tested LocalDevVPN topology uses same-subnet `/32` addresses:
+- **On-device SideStore refresh path** through official LocalDevVPN + CoreDevice.
+- **Free Apple Account / Personal Team** support.
+- **SideStore + up to two personally signed apps** within the normal free-account app limit.
+- **Native iOS background scheduling** using `BGProcessingTask`.
+- Configurable **six-hour, daily, or weekly** refresh scheduling.
+- Persistent refresh history and diagnostic markers.
+- No jailbreak and no custom VPN application.
+- Reproducible GitHub Actions build from pinned upstream revisions.
+
+## Verification status
+
+| Capability | Status |
+| --- | --- |
+| LocalDevVPN → Lockdown/CoreDevice connection | ✅ Verified on real iPhone |
+| CoreDeviceProxy TLS + CDTunnel + RSD | ✅ Verified |
+| AFC IPA staging | ✅ Verified |
+| InstallationProxy install | ✅ Verified |
+| Post-install application verification | ✅ Verified |
+| Manual `Refresh All` over CoreDevice | ✅ Verified |
+| Native background-task registration | ✅ Verified |
+| Native background-task scheduling | ✅ Verified |
+| Schedule/history code and IPA build | ✅ CI verified |
+| Full unattended scheduled refresh with PC disconnected | ⏳ Final device proof pending |
+
+Tested transport hardware: **iPhone 12 running iOS 26.6.1**.
+
+The latest verified manual `Refresh All` refreshed Spotify and SideStore successfully over the CoreDevice transport in **18.571 seconds**.
+
+See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the exact evidence, build hashes, device markers, and remaining proof requirements.
+
+## Quick start
+
+### 1. Fork this repository
+
+GitHub only allows repository collaborators to manually run Actions on this repository. If you are not a collaborator, **fork the repository to your own GitHub account** first.
+
+### 2. Run the builder
+
+In your fork:
+
+1. Open **Actions**.
+2. Enable Actions for the fork if GitHub asks.
+3. Select **Build Current SideStore**.
+4. Click **Run workflow** on `main`.
+5. Wait for the build to finish successfully.
+6. Open the completed workflow run.
+7. Download the `SideStore-v30-background-automation` artifact.
+8. Extract the ZIP and use the included `SideStore.ipa`.
+
+Workflow source: [`.github/workflows/build-current.yml`](.github/workflows/build-current.yml)
+
+### 3. Install over your existing SideStore
+
+Install the generated IPA **over the existing SideStore installation** using your development installer.
+
+Do **not** delete SideStore first. Replacing the existing installation preserves pairing data, account state, and the local database required by the refresh path.
+
+### 4. Prepare the iPhone
+
+After installation:
+
+- Open SideStore once.
+- Keep the official **LocalDevVPN** connected.
+- Keep **Developer Mode** enabled.
+- Enable **Background App Refresh** in iOS.
+- Keep the device on **Wi-Fi**.
+- Use a valid Lockdown pairing file.
+- Use the tested same-subnet `/32` LocalDevVPN topology.
+
+### 5. Configure refresh scheduling
+
+In SideStore:
+
+**Settings → Refreshing Apps → Refresh Schedule**
+
+Choose one of the available schedules:
+
+- Every Six Hours
+- Daily at a preferred local time
+- Weekly on a selected weekday/time
+
+Weekly scheduling leaves little safety margin before free-account apps expire, and iOS may delay background execution. Six-hour or daily scheduling is safer.
+
+> iOS decides when a `BGProcessingTask` actually runs. A scheduled time is an earliest eligible time, not a guaranteed alarm.
+
+## Requirements
+
+- Free Apple Account / Personal Team
+- Valid Lockdown pairing file
+- Developer Mode
+- Wi-Fi
+- Official unmodified LocalDevVPN from the App Store
+- Same-subnet `/32` LocalDevVPN configuration
+
+Tested topology:
 
 ```text
 Tunnel IP:       TUNNEL_IP/32
 Device peer IP:  DEVICE_PEER_IP/32
 ```
 
-The implementation intentionally does not use QUIC or RemotePairing dynamic
-TCP. Those paths are not used by the current product.
+The PC and USB are needed for **building, initial installation, diagnostics, and log capture only**. They are not part of the intended refresh runtime.
 
-## Changes In SideStore
+## How it works
 
-The build applies focused patches to upstream SideStore and its transport
-dependencies. The source checkouts are downloaded at build time; they are not
-stored permanently in this repository.
+```text
+official LocalDevVPN
+        |
+        v
+Lockdown pairing
+        |
+        v
+CoreDeviceProxy over TLS
+        |
+        v
+CDTunnel
+        |
+        v
+jktcp userspace IPv6 adapter
+        |
+        v
+RSD
+        |
+        +--> AFC --> IPA staging
+        |
+        +--> InstallationProxy --> install/refresh
+        |
+        v
+SideStore refresh pipeline
+```
+
+The implementation intentionally does **not** use QUIC or RemotePairing dynamic TCP in the current product path.
+
+## What is patched
+
+This repository does not vendor a permanent copy of SideStore or its dependency source trees. GitHub Actions checks out pinned upstream revisions and applies focused patches at build time.
 
 ### SideStore integration
 
 - Composite pairing records prefer the Lockdown/CoreDevice path.
 - LocalDevVPN route discovery derives and validates the device peer address.
 - The obsolete IKEv2 requirement is not applied to the CoreDevice path.
-- CoreDevice connections are created from the Lockdown pairing file and device
-  endpoint.
+- CoreDevice connections are created from the Lockdown pairing file and device endpoint.
 - CoreDevice services use RSD for device-service discovery.
 - AFC staging and InstallationProxy installation are available through RSD.
-- The gateway reuses an active CoreDevice transport and detects stale
-  heartbeat state before creating a new one.
-- Pairing-file and provider cleanup is serialized to avoid ownership errors and
-  double frees.
-- Refresh and installation operations emit public diagnostic markers without
-  logging private keys or other sensitive pairing material.
+- The gateway reuses an active CoreDevice transport and detects stale heartbeat state before creating a new one.
+- Pairing-file/provider cleanup is serialized to avoid ownership errors and double frees.
+- Refresh/install operations emit public diagnostic markers without logging private keys or sensitive pairing material.
 
-### CoreDevice and idevice transport
+### CoreDevice / idevice transport
 
-- CoreDeviceProxy keeps a `com.apple.mobile.heartbeat` Marco/Polo session alive
-  for the complete transport operation.
-- Service TLS remains enabled after Lockdown returns `EnableServiceSSL=true`.
+- CoreDeviceProxy keeps `com.apple.mobile.heartbeat` Marco/Polo alive for the full transport operation.
+- Service TLS remains enabled when Lockdown returns `EnableServiceSSL=true`.
 - CDTunnel requests are encoded as one contiguous frame before writing.
-- The effective TCP MSS is limited to 1340 bytes because CoreDeviceProxy can
-  drop larger host-to-device IPv6 packets despite advertising a larger MTU.
-- AFC FFI operations use the local async runtime path so they do not create a
-  conflicting executor for the userspace transport.
-- AFC/provider and plist-array memory ownership is corrected at the FFI
-  boundary.
+- Effective TCP MSS is limited to 1340 bytes because CoreDeviceProxy can drop larger host-to-device IPv6 packets despite advertising a larger MTU.
+- AFC FFI operations use the local async runtime path to avoid a conflicting executor.
+- AFC/provider and plist-array ownership is corrected at the FFI boundary.
 
 ### jktcp reliability
 
-- Zero-window persist probes recover transfers when the peer's window closes
-  and the window-update packet is lost.
-- Window close and reopen events expose transport diagnostics.
+- Zero-window persist probes recover transfers when a window-update packet is lost.
+- Window close/reopen events expose transport diagnostics.
 - Timer-driven retransmission errors wake blocked readers.
-- Transport write errors are propagated instead of silently leaving a transfer
-  waiting forever.
+- Transport write errors propagate instead of leaving a transfer waiting indefinitely.
 
-## Automatic Refresh
+## Native background refresh
 
-SideStore now registers a native iOS `BGProcessingTask` with the identifier:
+SideStore registers a native iOS `BGProcessingTask` with:
 
 ```text
 com.SideStore.SideStore.automatic-refresh
 ```
 
-Settings > Refreshing Apps > Refresh Schedule controls the native schedule.
-Background Refresh can be enabled or disabled there. Choose Every Six Hours
-(the existing default), Daily with a preferred local time, or Weekly with a
-weekday and time. The initial time is 10:00 and the initial weekly day is
-Monday. Weekdays follow the device's language and first-day-of-week setting.
-Existing daily preferences and selected times survive an upgrade.
-Changes are saved immediately and replace the pending request.
-Disabling Background Refresh cancels that request.
-
-Weekly refresh leaves little margin before free-account apps expire, and iOS
-may delay execution beyond that point. The schedule screen displays this risk.
-
-The screen shows the earliest eligible date accepted by iOS, submission errors
-with a retry action, and whether system Background App Refresh is unavailable.
-The same screen includes the latest 100 history events: accepted schedules,
-task starts, completion, failure, skipped runs, and background-time expiration.
-Manual app refreshes and Refresh All also record their start and actual results
-here, tagged **Manual**. Native scheduled events are tagged **Scheduled**.
-Mixed app results are recorded as a failure with the successful app count;
-missing results are never treated as successful refreshes.
-History persists across launches and can be cleared with confirmation. Accepted
-schedules are distinct from actual refresh runs; repeated submissions of the
-same pending date do not add duplicate history entries.
-
-A local notification with sound is requested when iOS actually starts an
-enabled scheduled task. It is not scheduled in advance for the preferred time.
-The Start Alert section shows notification permission and provides permission
-or Settings controls. iOS notification settings govern alert presentation.
-History begins with this feature's installation; it does not reconstruct old
-runs from logs. If self-replacement ends the process before its completion
-callback, the history retains the start event without inventing a success.
-
-The task requires network connectivity, but does not require external power.
-iOS controls its actual execution time; the selected time is not a guaranteed
-alarm. This control does not edit personal automations in Apple Shortcuts.
-An existing daily Shortcuts automation must still be edited in Shortcuts.
-
-Scheduling preserves a pending request across app launches and background
-transitions so reopening SideStore does not postpone it. Daily calculations
-use the local calendar, handle daylight-saving transitions, and recalculate
-when a different time zone is observed.
-
-When iOS runs the task, SideStore:
+When iOS starts an enabled scheduled task, SideStore:
 
 1. Reschedules the next task.
 2. Waits for the CoreDevice transport boot sequence.
 3. Starts the database if necessary.
 4. Selects installed apps eligible for refresh.
 5. Includes SideStore in the refresh operation.
-6. Performs the existing signing, provisioning, staging, and installation
-   pipeline.
+6. Runs the existing signing, provisioning, staging, and installation pipeline.
 7. Cancels the active operation if iOS expires the task.
 8. Reports success only when all nested refresh results succeed.
 
-Important log markers include:
+Important markers:
 
 ```text
 [AUTO_REFRESH] REGISTER_PASS
@@ -157,27 +211,28 @@ Important log markers include:
 [AUTO_REFRESH] COMPLETE success=true
 ```
 
-`REGISTER_PASS` and `SCHEDULE_PASS` prove that the task was registered and
-accepted by iOS. They do not prove that iOS has executed it yet. A real
-autonomous run requires the `TRIGGER`, operation, and successful completion
-markers.
+`REGISTER_PASS` and `SCHEDULE_PASS` prove registration/submission only. They do **not** prove that iOS executed the task.
 
-## Build
+Full PC-free background automation is considered proven only after a scheduled task runs with the PC disconnected and produces the trigger, operation, and successful completion evidence documented in [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 
-Run the GitHub Actions workflow:
+## Refresh history and alerts
 
-```text
-.github/workflows/build-current.yml
-```
+The patched build includes persisted refresh history for scheduled and manual operations. It records accepted schedules, starts, completion, failure, skipped runs, background expiration, and manual refresh results.
 
-The workflow checks out these exact revisions:
+A local notification with sound is requested when iOS actually starts an enabled scheduled task. It is not pre-scheduled for the preferred refresh time; iOS remains in control of actual background execution.
+
+History starts with installation of this feature and does not reconstruct old runs from previous logs.
+
+## Reproducible build
+
+The workflow currently pins these revisions:
 
 - SideStore: `394bb4eb331cb4afc23517af2fc847ec103af57f`
 - minimuxer: `e0de126ec6773c02afe7d965def86ddffd79cbeb`
 - idevice: `ebd7dadfc55d1c4facee3d11ecf5b28e20548b57`
 - jktcp: `e674e1eee6d5943e13b1eba0bd24a9dd0b2fa020`
 
-The retained patch scripts are:
+Patch scripts:
 
 - `scripts/patch_coredevice_idevice.py`
 - `scripts/patch_sidestore_integration.py`
@@ -185,77 +240,42 @@ The retained patch scripts are:
 - `scripts/patch_local_idevice_package.py`
 - `scripts/patch_jktcp_reliability.py`
 
-The workflow builds on macOS with Xcode, compiles the Rust and Swift
-components, verifies the IPA contents, and uploads the installable artifact.
+The Action compiles the Rust and Swift components on macOS/Xcode, validates the patched source, runs repository and transport tests, verifies the IPA contents, and uploads the resulting IPA as a workflow artifact.
 
-## Installation And Runtime
+## Local repository checks
 
-Install the resulting IPA over the existing SideStore installation using the
-development installer. Do not delete the existing SideStore first, because its
-pairing data, account state, and local database must be preserved.
-
-After installation:
-
-- Open SideStore once.
-- Keep official LocalDevVPN connected.
-- Confirm iOS Background App Refresh is enabled.
-- Confirm Developer Mode is enabled.
-- Keep the phone on Wi-Fi.
-
-The PC and USB are allowed for building, initial installation, diagnostics, and
-log capture only. They are not part of the intended refresh runtime.
-
-## Verification
-
-The current IPA is:
-
-```text
-SideStore-v30-background-automation.ipa
-```
-
-The transport has been physically tested on an iPhone 12 running iOS 26.6.1.
-The known-good path reached RSD, AFC, InstallationProxy, real IPA staging, and
-post-install application browsing. The current V30 build additionally proved
-background-task registration and scheduling on the device.
-
-The remaining proof for full PC-free automation is a later iOS-scheduled run
-showing the `TRIGGER` and `COMPLETE success=true` markers while the PC is
-disconnected.
-
-Never upload or commit a pairing file, certificate private key, or unnecessary
-device identifier.
-
-## Repository Quality
-
-The repository contains only build-time patch scripts and documentation. It
-does not vendor SideStore or its dependency source trees. The upstream source
-is checked out at pinned revisions during the build and patched in the runner.
-
-The public-release safeguards are documented in:
-
-- `LICENSE`
-- `CONTRIBUTING.md`
-- `SECURITY.md`
-- `docs/VERIFICATION.md`
-- `tests/test_repository.py`
-
-Run the local checks with:
-
-```text
+```bash
 python -m unittest discover -s tests -v
 ```
 
-The current build architecture is:
+Public-release safeguards are documented in:
 
-```text
-official LocalDevVPN
-        |
-        v
-Lockdown pairing -> CoreDeviceProxy/TLS -> CDTunnel -> jktcp IPv6
-                                                        |
-                                                        v
-                                             RSD -> AFC -> InstallationProxy
-                                                        |
-                                                        v
-                                             SideStore refresh/install
-```
+- [`LICENSE`](LICENSE)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`SECURITY.md`](SECURITY.md)
+- [`docs/VERIFICATION.md`](docs/VERIFICATION.md)
+- [`tests/test_repository.py`](tests/test_repository.py)
+
+## Security
+
+Never upload or commit:
+
+- pairing files
+- certificate private keys
+- signed IPAs containing personal signing material
+- unnecessary device identifiers
+- private device logs
+
+The public repository intentionally contains build-time patch scripts and documentation rather than personal signing material.
+
+## Contributing
+
+Bug reports, device verification results, transport diagnostics, documentation improvements, and focused fixes are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request.
+
+If you reproduce a successful **scheduled refresh with the PC disconnected**, include the non-sensitive markers and device/iOS version. That evidence directly advances the final verification milestone.
+
+## Support the project
+
+If this solves the SideStore seven-day refresh problem for you, **star the repository** so other SideStore users can find it.
+
+If you test it on another iPhone/iOS version, open an issue with the result — successful or failed. Real-device compatibility data is more valuable than guesses.
