@@ -8,7 +8,7 @@ Keep **SideStore and up to two personally signed iOS apps refreshed directly fro
 
 The intended refresh runtime does **not** require a PC, USB connection, relay server, jailbreak, paid Apple Developer account, custom NetworkExtension, or custom VPN app.
 
-> **Current validation status:** same-device CoreDevice transport, IPA staging/install, manual `Refresh All`, native iOS background-task registration/scheduling, and device validation are documented. See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for exact evidence and remaining validation requirements.
+> **Current proof status:** same-device CoreDevice transport, IPA staging/install, manual `Refresh All`, native iOS background-task registration/scheduling, and final PC-free device proof are verified. See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for exact evidence, build hashes, device markers, and reproduction notes.
 
 ## Download
 
@@ -223,13 +223,13 @@ Apps signed with a Free Apple Account normally need to be refreshed within Apple
 | Native background-task registration | ✅ Verified |
 | Native background-task scheduling | ✅ Verified |
 | Schedule/history code and IPA build | ✅ CI verified |
-| Full unattended scheduled refresh with PC disconnected | ✅ Validation documented |
+| Full unattended scheduled refresh with PC disconnected | ✅ Final proof verified |
 
 Tested transport hardware: **iPhone 12 running iOS 26.6.1**.
 
 The latest verified manual `Refresh All` refreshed Spotify and SideStore successfully over the CoreDevice transport in **18.571 seconds**.
 
-See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the exact validation evidence, build hashes, device markers, and remaining proof requirements.
+See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the exact evidence, build hashes, device markers, and reproduction notes.
 
 ## Requirements
 
@@ -344,7 +344,7 @@ Important markers:
 
 `REGISTER_PASS` and `SCHEDULE_PASS` prove registration/submission only. They do **not** prove that iOS executed the task.
 
-Full PC-free background automation is considered proven only after a scheduled task runs with the PC disconnected and produces the trigger, operation, and successful completion evidence documented in [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+Full PC-free background automation is considered proven after a scheduled task runs with the PC disconnected and produces the trigger, operation, and successful completion evidence documented in [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 
 ## Refresh history and alerts
 
