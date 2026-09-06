@@ -81,6 +81,23 @@ In the official **LocalDevVPN** app:
 
 > If LocalDevVPN shows its original/default addresses again after the warning/confirmation screen, re-enter your custom Tunnel IP and Device IP, then use **Done → Save & Apply → Connect**.
 
+### Important for local development and diagnostics
+
+When running a local development or diagnostic build from a computer, the iPhone must be on the **same Wi-Fi network** as the development machine, and the VPN path must be brought up in the correct order before opening SideStore.
+
+Use this order:
+
+```text
+1. Connect the iPhone to Wi-Fi.
+2. Enable the required IKEv2/IPSec VPN profile if your local diagnostic setup uses it.
+3. Connect the official LocalDevVPN.
+4. Open SideStore.
+```
+
+For normal on-device refresh runtime, keep the official **LocalDevVPN** connected and keep the device on **Wi-Fi**. The computer, USB cable, and local diagnostic VPN are not part of the intended refresh runtime.
+
+If SideStore cannot reach the local/CoreDevice path during development, do not start by changing the code. First verify the Wi-Fi subnet, the LocalDevVPN Tunnel IP / Device IP values, and the VPN connection order above.
+
 ### Important: which address SideStore uses
 
 For CoreDevice/Lockdown traffic, the **Device IP is the peer address**. SideStore must reach the device peer through that address; the Tunnel IP is the local tunnel-side address.
@@ -99,21 +116,21 @@ The current implementation discovers and validates this same-subnet `/32` peer r
 <table>
   <tr>
     <td align="center">
-      <img src="docs/screenshots/settings-refreshing-apps.jpg" width="180" alt="SideStore Refreshing Apps settings"><br>
+      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/settings-refreshing-apps.jpg" width="180" alt="SideStore Refreshing Apps settings"><br>
       <b>Refreshing Apps settings</b>
     </td>
     <td align="center">
-      <img src="docs/screenshots/refresh-schedule-main.jpg" width="180" alt="SideStore Refresh Schedule"><br>
+      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-main.jpg" width="180" alt="SideStore Refresh Schedule"><br>
       <b>Refresh Schedule</b>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="docs/screenshots/refresh-schedule-options.jpg" width="180" alt="Six-hour, daily, and weekly refresh schedule options"><br>
+      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-options.jpg" width="180" alt="Six-hour, daily, and weekly refresh schedule options"><br>
       <b>Six-hour, daily, or weekly</b>
     </td>
     <td align="center">
-      <img src="docs/screenshots/refresh-history.jpg" width="180" alt="SideStore refresh history"><br>
+      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-history.jpg" width="180" alt="SideStore refresh history"><br>
       <b>Persistent refresh history</b>
     </td>
   </tr>
