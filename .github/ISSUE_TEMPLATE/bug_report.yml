@@ -1,0 +1,83 @@
+name: Bug report
+description: Report a reproducible build, transport, refresh, or installation problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not upload pairing files, private keys, Apple credentials, signed personal IPAs, or unredacted private device logs.
+
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: iPhone/iPad model used for the test.
+      placeholder: iPhone 12
+    validations:
+      required: true
+
+  - type: input
+    id: ios
+    attributes:
+      label: iOS version
+      placeholder: iOS 26.6.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Failure area
+      options:
+        - GitHub Actions build
+        - Initial installation
+        - LocalDevVPN / route discovery
+        - CoreDevice transport
+        - Manual Refresh All
+        - Background scheduling
+        - Scheduled background execution
+        - Refresh history / UI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Give the shortest exact sequence that reproduces the issue.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+
+  - type: textarea
+    id: markers
+    attributes:
+      label: Relevant non-sensitive markers
+      description: Paste only the minimum redacted AUTO_REFRESH / SIDESTORE_COREDEVICE / SELF_REFRESH markers needed to diagnose the issue.
+      render: text
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I confirmed this report does not contain pairing records, private keys, Apple credentials, signed personal IPAs, or unnecessary device identifiers.
+          required: true
