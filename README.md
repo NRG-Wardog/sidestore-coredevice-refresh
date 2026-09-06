@@ -16,7 +16,7 @@ Additional device/iOS/network compatibility reports are welcome. See [`docs/COMP
 
 ### Prebuilt IPA — recommended
 
-**[Download SideStore CoreDevice Auto-Refresh v1.0.2](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.2/new.ipa)**
+**[Download SideStore CoreDevice Auto-Refresh v1.0.2](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.2/SideStore-CoreDevice-AutoRefresh-v1.0.2.ipa)**
 
 Latest release: **[v1.0.2](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/latest)**
 
