@@ -75,6 +75,19 @@ jobs:
             2>&1 | tee artifacts/logs/livecontainer-build.log
           rm -rf "$HOME/Library/Caches/org.swift.swiftpm/artifacts/https___github_com_krzyzanowskim_OpenSSL_releases_download_3_6_2000_OpenSSL_xcframework_zip"
           rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*/SourcePackages/artifacts/openssl
+          artifact="$HOME/Library/Caches/org.swift.swiftpm/artifacts/https___github_com_krzyzanowskim_OpenSSL_releases_download_3_6_2000_OpenSSL_xcframework_zip"
+          resolved=0
+          for attempt in 1 2 3; do
+            rm -rf "$artifact"
+            rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*/SourcePackages/artifacts/openssl 2>/dev/null || true
+            if xcodebuild -resolvePackageDependencies -disablePackageRepositoryCache \
+                -project work/EmbeddedSideStore/AltStore.xcodeproj -scheme SideStore; then
+              resolved=1
+              break
+            fi
+            sleep 2
+          done
+          test "$resolved" -eq 1
           xcodebuild -project work/EmbeddedSideStore/AltStore.xcodeproj \
             -scheme SideStore -sdk iphoneos -configuration Release \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
