@@ -113,21 +113,29 @@ The current implementation discovers and validates this same-subnet `/32` peer r
 
 ## Screenshots
 
-### Refreshing Apps settings
+<p align="center">
+  <img src="docs/screenshots/settings-refreshing-apps.png" width="240" alt="SideStore Refreshing Apps settings">
+  <br>
+  <strong>Refreshing Apps settings</strong>
+</p>
 
-![SideStore Refreshing Apps settings](docs/screenshots/settings-refreshing-apps.png)
+<p align="center">
+  <img src="docs/screenshots/refresh-schedule-main.png" width="240" alt="SideStore Refresh Schedule">
+  <br>
+  <strong>Refresh Schedule</strong>
+</p>
 
-### Refresh Schedule
+<p align="center">
+  <img src="docs/screenshots/refresh-schedule-options.png" width="240" alt="Six-hour, daily, and weekly refresh schedule options">
+  <br>
+  <strong>Six-hour, daily, or weekly</strong>
+</p>
 
-![SideStore Refresh Schedule](docs/screenshots/refresh-schedule-main.png)
-
-### Six-hour, daily, or weekly
-
-![Six-hour, daily, and weekly refresh schedule options](docs/screenshots/refresh-schedule-options.png)
-
-### Persistent refresh history
-
-![SideStore refresh history](docs/screenshots/refresh-history.png)
+<p align="center">
+  <img src="docs/screenshots/refresh-history.png" width="240" alt="SideStore refresh history">
+  <br>
+  <strong>Persistent refresh history</strong>
+</p>
 
 These screens show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, and persisted manual refresh results.
 
