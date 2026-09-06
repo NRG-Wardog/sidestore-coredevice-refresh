@@ -35,7 +35,7 @@ Prefer to inspect and reproduce the build yourself? See [Build it yourself](#bui
 1. Download the prebuilt IPA above.
 2. Install it **over your existing SideStore** using your development installer.
 3. Open SideStore once.
-4. Configure **LocalDevVPN for your current Wi-Fi subnet** using the required setup below.
+4. Configure the official **LocalDevVPN** for the iPhone's current Wi-Fi subnet using the required setup below.
 5. Keep the official **LocalDevVPN** connected.
 6. Keep **Developer Mode** enabled.
 7. Enable **Background App Refresh** in iOS.
@@ -51,52 +51,79 @@ Weekly scheduling leaves little safety margin before free-account apps expire, a
 
 This step is **required** for the current CoreDevice transport path.
 
-The default LocalDevVPN address range should not be left unchanged. Configure LocalDevVPN so its **Tunnel IP** and **Device IP** are two unused IPv4 addresses inside the **same subnet as the iPhone's current Wi-Fi network**, and use `/32` for both addresses.
-
-For example, if the iPhone is connected to a Wi-Fi network in the form:
+For the normal on-device refresh runtime, the expected network stack is:
 
 ```text
-192.168.1.x/24
+iPhone Wi-Fi + official App Store LocalDevVPN
 ```
 
-choose two unused addresses from that same subnet, for example:
+Do **not** enable IKEv2/IPSec, WireGuard, a custom DNS tunnel, a relay server, or a custom VPN app for the normal refresh path. Those were useful during early diagnostics only. The product path is Wi-Fi plus the official unmodified LocalDevVPN.
+
+The important setting is inside **LocalDevVPN → Settings → Network Configuration**. It is **not** the iOS Wi-Fi HTTP Proxy setting.
+
+Configure LocalDevVPN so its **Tunnel IP** and **Device IP** are two unused IPv4 addresses inside the **same subnet as the iPhone's current Wi-Fi network**, and use `/32` for both addresses.
+
+Do not leave LocalDevVPN on its default/private tunnel range. SideStore's current CoreDevice path expects the LocalDevVPN peer route to match the Wi-Fi subnet that the iPhone is actually using.
+
+For example, if the iPhone is connected to Wi-Fi as:
 
 ```text
-Tunnel IP:  192.168.1.240/32
-Device IP:  192.168.1.241/32
+10.0.0.15/24
 ```
 
-Do **not** copy those example addresses blindly. Use two addresses that are unused on your own Wi-Fi subnet.
+choose two unused addresses from that same subnet:
+
+```text
+Tunnel IP:  10.0.0.240/32
+Device IP:  10.0.0.241/32
+```
+
+If the Wi-Fi network is `192.168.1.x/24`, choose two unused `192.168.1.x/32` addresses instead.
+
+Do **not** use:
+
+- the iPhone's real Wi-Fi address
+- the router/gateway address
+- an address already used by another device
+- a random address outside the current Wi-Fi subnet
+- the example addresses blindly
 
 In the official **LocalDevVPN** app:
 
 1. Open **Settings → Network Configuration**.
-2. Set **Tunnel IP** to the first unused address in your Wi-Fi subnet with `/32`.
-3. Set **Device IP** to a second unused address in the same subnet with `/32`.
+2. Set **Tunnel IP** to the first unused address in the current Wi-Fi subnet with `/32`.
+3. Set **Device IP** to a second unused address in the same Wi-Fi subnet with `/32`.
 4. Enable **Allow Intermediate Addresses**.
 5. Tap **Done**.
 6. Tap **Save & Apply**.
 7. Connect LocalDevVPN.
-8. Open **Session Details** and verify that the tunnel is using the values you entered.
+8. Open **Session Details** and verify that the tunnel is using the exact values you entered.
 
 > If LocalDevVPN shows its original/default addresses again after the warning/confirmation screen, re-enter your custom Tunnel IP and Device IP, then use **Done → Save & Apply → Connect**.
 
 ### Important for local development and diagnostics
 
-When running a local development or diagnostic build from a computer, the iPhone must be on the **same Wi-Fi network** as the development machine, and the VPN path must be brought up in the correct order before opening SideStore.
+During development, some early diagnostic builds used an extra IKEv2/IPSec profile to force a routable IPv4 path and to compare route selection. That was a diagnostic workaround, not the final requirement.
 
-Use this order:
+The final path should be treated as:
 
 ```text
-1. Connect the iPhone to Wi-Fi.
-2. Enable the required IKEv2/IPSec VPN profile if your local diagnostic setup uses it.
-3. Connect the official LocalDevVPN.
-4. Open SideStore.
+1. iPhone connected to Wi-Fi.
+2. Official LocalDevVPN configured with same-subnet /32 Tunnel IP and Device IP.
+3. LocalDevVPN connected and verified in Session Details.
+4. SideStore opened after the tunnel is connected.
 ```
 
-For normal on-device refresh runtime, keep the official **LocalDevVPN** connected and keep the device on **Wi-Fi**. The computer, USB cable, and local diagnostic VPN are not part of the intended refresh runtime.
+The computer and USB are only for building, initial installation, diagnostics, and log capture. They are not part of the intended refresh runtime.
 
-If SideStore cannot reach the local/CoreDevice path during development, do not start by changing the code. First verify the Wi-Fi subnet, the LocalDevVPN Tunnel IP / Device IP values, and the VPN connection order above.
+If SideStore cannot reach the CoreDevice path, do not start by changing code. First verify:
+
+- the iPhone is still on the Wi-Fi network used to choose the LocalDevVPN addresses
+- Tunnel IP and Device IP are both in that same Wi-Fi subnet
+- both values end with `/32`
+- **Allow Intermediate Addresses** is enabled
+- LocalDevVPN is connected
+- Session Details still shows the custom values and did not reset to defaults
 
 ### Important: which address SideStore uses
 
