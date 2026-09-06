@@ -148,6 +148,12 @@ print("Schedule date tests passed")
             self.assertIn("AutomaticRefreshHistory.record(.failed", section)
             background = (root / FILES[-1]).read_text()
             self.assertIn("recordManualHistory: false", background)
+            settings = (root / "AltStore/Settings/SettingsViewController.swift").read_text()
+            self.assertIn("Preferred Time (Local)", settings)
+            self.assertIn("TimeZone.autoupdatingCurrent.identifier", settings)
+            app_delegate = (root / "AltStore/AppDelegate.swift").read_text()
+            self.assertIn("Calendar.autoupdatingCurrent", app_delegate)
+            self.assertIn("earliest_utc=", app_delegate)
             if SWIFTC:
                 for name in FILES:
                     if name.endswith(".swift"):

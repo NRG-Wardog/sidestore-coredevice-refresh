@@ -194,13 +194,15 @@ private struct AutomaticRefreshScheduleView: View
     @State private var notificationError: String?
     @Environment(\.scenePhase) private var scenePhase
 
+    private var localCalendar: Calendar { Calendar.autoupdatingCurrent }
+
     private var time: Binding<Date> {
         Binding(get: {
             let value = (0..<1440).contains(minutes) ? minutes : 600
-            return Calendar.current.date(bySettingHour: value / 60, minute: value % 60,
+            return localCalendar.date(bySettingHour: value / 60, minute: value % 60,
                                          second: 0, of: Date()) ?? Date()
         }, set: { date in
-            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            let parts = localCalendar.dateComponents([.hour, .minute], from: date)
             minutes = (parts.hour ?? 10) * 60 + (parts.minute ?? 0)
         })
     }
@@ -227,8 +229,10 @@ private struct AutomaticRefreshScheduleView: View
                         .foregroundColor(.secondary)
                 }
                 if frequency != "interval" {
-                    DatePicker("Preferred Time", selection: time, displayedComponents: .hourAndMinute)
+                    DatePicker("Preferred Time (Local)", selection: time, displayedComponents: .hourAndMinute)
                         .disabled(!enabled)
+                    Text("Uses this iPhone's local timezone: \(TimeZone.autoupdatingCurrent.identifier)")
+                        .font(.caption).foregroundColor(.secondary)
                 }
             }
             Section {
@@ -360,7 +364,10 @@ private struct AutomaticRefreshPendingDateView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Earliest Eligible Refresh")
             Text(date, style: .date).foregroundColor(.secondary)
-            Text(date, style: .time).foregroundColor(.secondary)
+            Text("Local time: \(date.formatted(date: .abbreviated, time: .shortened))")
+                .foregroundColor(.secondary)
+            Text("Timezone: \(TimeZone.autoupdatingCurrent.identifier)")
+                .font(.caption).foregroundColor(.secondary)
         }
     }
 }
@@ -568,7 +575,10 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         }}
 
         // Preserve an already eligible request when the app enters the background again.
-        let nextDate = AutomaticRefreshSchedule.requestDate(after: Date(), replacePending: replacePending)
+        var localCalendar = Calendar.autoupdatingCurrent
+        localCalendar.timeZone = TimeZone.autoupdatingCurrent
+        let nextDate = AutomaticRefreshSchedule.requestDate(after: Date(), replacePending: replacePending,
+                                                             calendar: localCalendar)
         let previousDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
         let request = BGProcessingTaskRequest(identifier: Self.automaticRefreshTaskIdentifier)
         request.earliestBeginDate = nextDate
@@ -579,11 +589,11 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         {{
             try BGTaskScheduler.shared.submit(request)
             UserDefaults.standard.set(nextDate, forKey: "automaticRefreshPendingDate")
-            UserDefaults.standard.set(AutomaticRefreshSchedule.configuration(), forKey: AutomaticRefreshSchedule.configurationKey)
+            UserDefaults.standard.set(AutomaticRefreshSchedule.configuration(calendar: localCalendar), forKey: AutomaticRefreshSchedule.configurationKey)
             if previousDate != nextDate || !AutomaticRefreshHistory.load().contains(where: {{ $0.event == .scheduled && $0.eligibleDate == nextDate }}) {{
                 AutomaticRefreshHistory.record(.scheduled, eligibleDate: nextDate)
             }}
-            debugLog("[AUTO_REFRESH] SCHEDULE_PASS earliest=\\(nextDate) network_required=true external_power_required=false")
+            debugLog("[AUTO_REFRESH] SCHEDULE_PASS local=\\(nextDate.formatted(date: .abbreviated, time: .shortened)) timezone=\\(localCalendar.timeZone.identifier) earliest_utc=\\(nextDate) network_required=true external_power_required=false")
         }}
         catch
         {{
