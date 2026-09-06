@@ -10,6 +10,8 @@ The intended refresh runtime does **not** require a PC, USB connection, relay se
 
 > **Current proof status:** same-device CoreDevice transport, IPA staging/install, manual `Refresh All`, native iOS background-task registration/scheduling, and final PC-free device proof are verified. See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for exact evidence, build hashes, device markers, and reproduction notes.
 
+Additional device/iOS/network compatibility reports are welcome. See [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) and [Issue #1](https://github.com/NRG-Wardog/sidestore-auto-refresh/issues/1).
+
 ## Download
 
 ### Prebuilt IPA — recommended
@@ -153,7 +155,7 @@ Tunnel IP  -> LocalDevVPN tunnel side
 Device IP  -> iPhone/CoreDevice peer used by SideStore
 ```
 
-The current implementation discovers and validates this same-subnet `/32` peer route before opening the CoreDevice transport.
+The current implementation discovers and validates this same-subnet `/32` peer route before opening the CoreDevice transport. The discovery code is not hardcoded to `10.x` or `192.168.x`; it derives candidates from the active tunnel interface and routing table.
 
 ## Screenshots
 
@@ -230,6 +232,14 @@ Tested transport hardware: **iPhone 12 running iOS 26.6.1**.
 The latest verified manual `Refresh All` refreshed Spotify and SideStore successfully over the CoreDevice transport in **18.571 seconds**.
 
 See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the exact evidence, build hashes, device markers, and reproduction notes.
+
+## Compatibility
+
+The current proof device is **iPhone 12 / iOS 26.6.1**. The next goal is broad compatibility coverage across additional devices, iOS versions, and private Wi-Fi network ranges.
+
+See the live [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) matrix and report successful or failed tests in [Issue #1](https://github.com/NRG-Wardog/sidestore-auto-refresh/issues/1) or through the **Device verification** issue template.
+
+The implementation is designed to be IPv4-range agnostic. `10.x`, `192.168.x`, and other valid network ranges are not hardcoded; the LocalDevVPN configuration must still use unused `/32` addresses inside the device's current Wi-Fi subnet.
 
 ## Requirements
 
@@ -395,9 +405,11 @@ python -m unittest discover -s tests -v
 Public-release safeguards are documented in:
 
 - [`LICENSE`](LICENSE)
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`SECURITY.md`](SECURITY.md)
 - [`docs/VERIFICATION.md`](docs/VERIFICATION.md)
+- [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 - [`tests/test_repository.py`](tests/test_repository.py)
 
 ## Security
@@ -412,11 +424,15 @@ Never upload or commit:
 
 The public repository intentionally contains build-time patch scripts and documentation rather than personal signing material.
 
+## Licensing
+
+Original repository-authored builder scripts, tests, and documentation are MIT-licensed unless a file states otherwise. SideStore and other upstream projects retain their own applicable license terms, and those upstream licenses continue to apply to upstream-derived code and the distributed modified IPA. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## Contributing
 
-Bug reports, device verification results, transport diagnostics, documentation improvements, and focused fixes are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request.
+Bug reports, device compatibility results, transport diagnostics, documentation improvements, and focused fixes are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request.
 
-If you reproduce a successful **scheduled refresh with the PC disconnected**, include the non-sensitive markers and device/iOS version. That evidence directly advances the final verification milestone.
+If you test the project on another iPhone/iPad, iOS version, or Wi-Fi network family, report the result — successful or failed. That data expands the public compatibility matrix.
 
 ## Support the project
 
