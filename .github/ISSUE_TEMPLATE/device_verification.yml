@@ -1,0 +1,81 @@
+name: Device verification
+description: Report a successful or failed real-device CoreDevice / refresh test
+title: "[Device]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Real-device results are especially valuable. The key open milestone is a native scheduled refresh completing successfully while the PC is disconnected.
+
+        Do not upload pairing files, private keys, Apple credentials, signed personal IPAs, or unredacted private device logs.
+
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      placeholder: iPhone 12
+    validations:
+      required: true
+
+  - type: input
+    id: ios
+    attributes:
+      label: iOS version
+      placeholder: iOS 26.6.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: manual
+    attributes:
+      label: Manual Refresh All over CoreDevice
+      options:
+        - Success
+        - Failed
+        - Not tested
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pc
+    attributes:
+      label: Was the PC disconnected during the scheduled test?
+      options:
+        - Yes
+        - No
+        - Scheduled execution not tested
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scheduled
+    attributes:
+      label: Native scheduled refresh result
+      options:
+        - Triggered and completed successfully
+        - Triggered but failed
+        - Request was scheduled but did not trigger yet
+        - Not tested
+    validations:
+      required: true
+
+  - type: textarea
+    id: markers
+    attributes:
+      label: Non-sensitive evidence
+      description: Paste the relevant redacted markers. A full autonomous success should include TRIGGER, AUTH_PREFLIGHT_PASS, OPERATION_START, and COMPLETE success=true.
+      render: text
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Include LocalDevVPN behavior, refreshed apps, expiration-date result, and anything unusual.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I confirmed this report contains no pairing records, private keys, Apple credentials, signed personal IPAs, or unnecessary device identifiers.
+          required: true
