@@ -1,0 +1,73 @@
+name: LiveContainer embedded SideStore build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LIVE_CONTAINER_REF: 12377cf3b91d51739a33f14a302e5f522b238593
+  EMBEDDED_SIDESTORE_REF: 10ffa01ecdfe4203a7ad5d7f41c0d5de03bd8abb
+
+jobs:
+  source-and-host-build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: builder
+          persist-credentials: false
+
+      - name: Checkout pinned LiveContainer sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/LiveContainer/LiveContainer.git work/LiveContainer
+          git -C work/LiveContainer checkout --detach "$LIVE_CONTAINER_REF"
+          git -C work/LiveContainer submodule update --init --recursive --depth=1
+
+      - name: Checkout pinned embedded SideStore sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/LiveContainer/SideStore.git work/EmbeddedSideStore
+          git -C work/EmbeddedSideStore checkout --detach "$EMBEDDED_SIDESTORE_REF"
+          git -C work/EmbeddedSideStore submodule update --init --recursive --depth=1
+
+      - name: Apply and verify host integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 builder/scripts/patch_livecontainer_autorefresh.py work/LiveContainer
+          python3 builder/scripts/patch_livecontainer_autorefresh.py work/LiveContainer
+          swiftc -frontend -parse work/LiveContainer/LiveContainerSwiftUI/App/AppDelegate.swift
+          swiftc -frontend -parse work/LiveContainer/LiveContainerSwiftUI/Views/Settings/LCEmbeddedSideStoreRefreshView.swift
+          swiftc -frontend -parse work/LiveContainer/SideStoreSupport/SideStore.swift
+          plutil -extract BGTaskSchedulerPermittedIdentifiers.0 raw work/LiveContainer/LiveContainer/Info.plist
+          xcodebuild -list -project work/LiveContainer/LiveContainer.xcodeproj
+          xcodebuild -list -project work/EmbeddedSideStore/AltStore.xcodeproj
+
+      - name: Build host and embedded SideStore source targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/logs
+          xcodebuild -project work/LiveContainer/LiveContainer.xcodeproj \
+            -scheme LiveContainer -sdk iphoneos -configuration Release \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
+            2>&1 | tee artifacts/logs/livecontainer-build.log
+          xcodebuild -project work/EmbeddedSideStore/AltStore.xcodeproj \
+            -scheme SideStore -sdk iphoneos -configuration Release \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
+            2>&1 | tee artifacts/logs/embedded-sidestore-build.log
+
+      - name: Upload source-build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: livecontainer-autorefresh-build-evidence
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 7
