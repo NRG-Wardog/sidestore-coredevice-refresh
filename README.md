@@ -61,6 +61,23 @@ Do **not** enable IKEv2/IPSec, WireGuard, a custom DNS tunnel, a relay server, o
 
 The important setting is inside **LocalDevVPN → Settings → Network Configuration**. It is **not** the iOS Wi-Fi HTTP Proxy setting.
 
+### What the VPN route is doing
+
+LocalDevVPN is used here to create a virtual route to a **Device IP** that sits inside the iPhone's current Wi-Fi subnet. The Tunnel IP and Device IP are route endpoints, not normal LAN devices.
+
+The reason for choosing same-subnet `/32` addresses is route selection: SideStore opens the CoreDevice/Lockdown path toward the **Device IP**, and iOS must have a valid LocalDevVPN route for that peer while the phone remains attached to Wi-Fi.
+
+In practical terms:
+
+```text
+Wi-Fi subnet        -> the real network the iPhone is on
+Tunnel IP /32       -> LocalDevVPN tunnel-side route address
+Device IP /32       -> synthetic peer address SideStore targets
+SideStore traffic   -> routed through LocalDevVPN to that Device IP
+```
+
+If the iPhone moves to a different Wi-Fi subnet, reconfigure these addresses. A route that matched the old Wi-Fi network may be wrong on the new one.
+
 Configure LocalDevVPN so its **Tunnel IP** and **Device IP** are two unused IPv4 addresses inside the **same subnet as the iPhone's current Wi-Fi network**, and use `/32` for both addresses.
 
 Do not leave LocalDevVPN on its default/private tunnel range. SideStore's current CoreDevice path expects the LocalDevVPN peer route to match the Wi-Fi subnet that the iPhone is actually using.
