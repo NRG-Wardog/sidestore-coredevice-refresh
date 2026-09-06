@@ -46,6 +46,33 @@ Weekly scheduling leaves little safety margin before free-account apps expire, a
 
 > iOS decides when a `BGProcessingTask` actually runs. A selected time is an earliest eligible time, not a guaranteed alarm.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/settings-refreshing-apps.jpg" width="260" alt="SideStore Refreshing Apps settings"><br>
+      <b>Refreshing Apps settings</b>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/refresh-schedule-main.jpg" width="260" alt="SideStore Refresh Schedule"><br>
+      <b>Refresh Schedule</b>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/refresh-schedule-options.jpg" width="260" alt="Six-hour, daily, and weekly refresh schedule options"><br>
+      <b>Six-hour, daily, or weekly</b>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/refresh-history.jpg" width="260" alt="SideStore refresh history"><br>
+      <b>Persistent refresh history</b>
+    </td>
+  </tr>
+</table>
+
+These screens show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, and persisted manual refresh results.
+
 ## Why this exists
 
 Apps signed with a Free Apple Account normally need to be refreshed within Apple's seven-day signing window. This project modifies SideStore so the refresh/install path can run over the iPhone's own LocalDevVPN/CoreDevice connection instead of depending on a computer during normal refresh operation.
