@@ -113,28 +113,29 @@ The current implementation discovers and validates this same-subnet `/32` peer r
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td align="center">
-      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/settings-refreshing-apps.jpg" width="180" alt="SideStore Refreshing Apps settings"><br>
-      <b>Refreshing Apps settings</b>
-    </td>
-    <td align="center">
-      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-main.jpg" width="180" alt="SideStore Refresh Schedule"><br>
-      <b>Refresh Schedule</b>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-options.jpg" width="180" alt="Six-hour, daily, and weekly refresh schedule options"><br>
-      <b>Six-hour, daily, or weekly</b>
-    </td>
-    <td align="center">
-      <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-history.jpg" width="180" alt="SideStore refresh history"><br>
-      <b>Persistent refresh history</b>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/settings-refreshing-apps.jpg" width="360" alt="SideStore Refreshing Apps settings">
+  <br>
+  <strong>Refreshing Apps settings</strong>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-main.jpg" width="360" alt="SideStore Refresh Schedule">
+  <br>
+  <strong>Refresh Schedule</strong>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-schedule-options.jpg" width="360" alt="Six-hour, daily, and weekly refresh schedule options">
+  <br>
+  <strong>Six-hour, daily, or weekly</strong>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/NRG-Wardog/sidestore-auto-refresh/main/docs/screenshots/refresh-history.jpg" width="360" alt="SideStore refresh history">
+  <br>
+  <strong>Persistent refresh history</strong>
+</p>
 
 These screens show the background-refresh controls, configurable scheduling, earliest eligible refresh time, notification status, and persisted manual refresh results.
 
