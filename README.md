@@ -358,4 +358,4 @@ If you reproduce a successful **scheduled refresh with the PC disconnected**, in
 
 If this solves the SideStore seven-day refresh problem for you, **star the repository** so other SideStore users can find it.
 
-If you test it on another iPhone/iOS version, open an issue with the result — successful or failed. Real-device compatibility data is more valuable than guesses.
+If you test it on another iPhone/iOS version, open an issue with the result — successful or failed.
