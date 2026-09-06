@@ -21,7 +21,7 @@ Additional reports are requested for:
 - `172.16-31.x` private Wi-Fi networks
 - unusual router/subnet configurations
 
-Use [Issue #1](../issues/1) or the **Device verification** issue template to report a result.
+Use [Issue #1](https://github.com/NRG-Wardog/sidestore-auto-refresh/issues/1) or the **Device verification** issue template to report a result.
 
 A useful report includes:
 
