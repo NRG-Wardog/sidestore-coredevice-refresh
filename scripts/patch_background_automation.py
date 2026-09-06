@@ -856,6 +856,7 @@ def patch_scene_delegate(sidestore: Path) -> None:
             "scene background reschedule",
         )
         path.write_text(text, encoding="utf-8")
+
     if marker not in text:
         die("SceneDelegate automatic refresh scheduling missing")
 
@@ -1102,6 +1103,66 @@ def patch_info_plist(sidestore: Path) -> None:
         die("Info.plist background processing configuration missing")
 
 
+def patch_console_log(sidestore: Path) -> None:
+    path = sidestore / "SideStore" / "Utils" / "iostreams" / "ConsoleLog.swift"
+    if not path.exists():
+        die(f"missing console log implementation: {path}")
+    text = path.read_text(encoding="utf-8")
+    marker = "LIVE_REFRESH_LOG_RETENTION_V1"
+    if marker in text:
+        return
+
+    constants = '''    // LIVE_REFRESH_LOG_RETENTION_V1: bound diagnostic storage on device.
+    private static let MAX_LOG_BYTES = 2 * 1024 * 1024
+    private static let MAX_LOG_FILES = 5
+'''
+    text = replace_once(
+        text,
+        "class ConsoleLog {\n",
+        "class ConsoleLog {\n" + constants,
+        "console log retention constants",
+    )
+    text = replace_once(
+        text,
+        "        let fileExists = FileManager.default.fileExists(atPath: url.path)\n",
+        "        pruneConsoleLogs(keeping: url)\n"
+        "        trimLogFileIfNeeded(at: url)\n"
+        "        let fileExists = FileManager.default.fileExists(atPath: url.path)\n",
+        "console log retention call",
+    )
+    helpers = r'''    private func trimLogFileIfNeeded(at url: URL) {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber,
+              size.intValue > ConsoleLog.MAX_LOG_BYTES,
+              let data = try? Data(contentsOf: url) else { return }
+
+        let tail = data.suffix(ConsoleLog.MAX_LOG_BYTES)
+        try? tail.write(to: url, options: .atomic)
+    }
+
+    private func pruneConsoleLogs(keeping activeURL: URL) {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: consoleLogsDir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ))?.filter { url in
+            url.pathExtension == String(ConsoleLog.CONSOLE_LOG_EXTN.dropFirst())
+                && url.lastPathComponent.hasPrefix(ConsoleLog.CONSOLE_LOG_NAME_PREFIX)
+        }.sorted { lhs, rhs in
+            let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return left > right
+        } ?? []
+
+        for (index, url) in files.enumerated() where index >= ConsoleLog.MAX_LOG_FILES && url != activeURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+'''
+    text = replace_once(text, "    private lazy var consoleLogsDir: URL = {\n", helpers + "    private lazy var consoleLogsDir: URL = {\n", "console log retention helpers")
+    path.write_text(text, encoding="utf-8")
+
 def verify(sidestore: Path) -> None:
     verify_app_delegate(
         (sidestore / "AltStore" / "AppDelegate.swift").read_text(encoding="utf-8")
@@ -1112,6 +1173,10 @@ def verify(sidestore: Path) -> None:
     settings = (sidestore / "AltStore/Settings/SettingsViewController.swift").read_text(encoding="utf-8")
     if SCHEDULE_UI not in settings or "#selector(openRefreshSchedule)" not in settings:
         die("Settings schedule verification failed")
+    console_log = (sidestore / "SideStore/Utils/iostreams/ConsoleLog.swift").read_text(encoding="utf-8")
+    for marker in ("LIVE_REFRESH_LOG_RETENTION_V1", "MAX_LOG_BYTES", "MAX_LOG_FILES", "pruneConsoleLogs"):
+        if marker not in console_log:
+            die(f"Console log retention verification failed: {marker}")
 
 
 def main() -> None:
@@ -1127,6 +1192,7 @@ def main() -> None:
     patch_manual_refresh(sidestore)
     patch_info_plist(sidestore)
     patch_settings(sidestore)
+    patch_console_log(sidestore)
     verify(sidestore)
     print("V30 background automation patch applied and verified")
 
