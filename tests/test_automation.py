@@ -18,7 +18,8 @@ REF = "394bb4eb331cb4afc23517af2fc847ec103af57f"
 FILES = ["AltStore/AppDelegate.swift", "AltStore/SceneDelegate.swift",
          "AltStore/Managing Apps/AppManager.swift",
          "AltStore/Info.plist", "AltStore/Settings/SettingsViewController.swift",
-         "SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift"]
+         "SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift",
+         "SideStore/Utils/iostreams/ConsoleLog.swift"]
 
 
 class AutomationTests(unittest.TestCase):
@@ -132,7 +133,8 @@ print("Schedule date tests passed")
                 target.write_bytes(contents)
             functions = [automation.patch_app_delegate, automation.patch_scene_delegate,
                          automation.patch_background_operation, automation.patch_info_plist,
-                         automation.patch_settings, automation.patch_manual_refresh, automation.verify]
+                         automation.patch_settings, automation.patch_manual_refresh,
+                         automation.patch_console_log, automation.verify]
             for patch in functions:
                 patch(root)
             first = {name: (root / name).read_bytes() for name in FILES}
@@ -146,7 +148,7 @@ print("Schedule date tests passed")
                             section.index("AutomaticRefreshHistory.finishManual"))
             self.assertIn("results: actualGroup.results", section)
             self.assertIn("AutomaticRefreshHistory.record(.failed", section)
-            background = (root / FILES[-1]).read_text()
+            background = (root / "SideStore/Core/Operations/StandaloneOperations/BackgroundRefreshAppsOperation.swift").read_text()
             self.assertIn("recordManualHistory: false", background)
             if SWIFTC:
                 for name in FILES:
