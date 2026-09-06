@@ -23,6 +23,38 @@ FILES = ["AltStore/AppDelegate.swift", "AltStore/SceneDelegate.swift",
 
 
 class AutomationTests(unittest.TestCase):
+    def test_scheduled_refresh_selection_contract(self):
+        source = (ROOT / "scripts/patch_background_automation.py").read_text(encoding="utf-8")
+        self.assertIn("InstalledApp.fetchAppsForBackgroundRefresh(in: context)", source)
+        self.assertIn("let sideStore = InstalledApp.fetchAltStore(in: context)", source)
+        self.assertIn("let sideStoreEligible = isSideStore && activeEligible && oldEnough && pledgeEligible", source)
+        self.assertIn("eligibleApps.append(sideStore)", source)
+        self.assertLess(source.index("eligibleApps.append(sideStore)"),
+                        source.index("AppManager.shared.backgroundRefresh"))
+        self.assertIn("SIDESTORE_REFRESH_ATTEMPT_STARTED", source)
+        self.assertIn("SIDESTORE_REFRESH_RESULT", source)
+        self.assertIn("APP_DIAGNOSTIC", source)
+
+        def select(apps):
+            normal = [app for app in apps if not app["sidestore"] and app["active"]
+                      and app["old"] and app["pledge"]]
+            side = [app for app in apps if app["sidestore"] and app["active"]
+                    and app["old"] and app["pledge"]]
+            return normal + side
+
+        spotify = {"id": "spotify", "sidestore": False, "active": True, "old": True, "pledge": True}
+        side_store = {"id": "sidestore", "sidestore": True, "active": True, "old": True, "pledge": True}
+        recent_side_store = dict(side_store, old=False)
+        inactive_spotify = dict(spotify, active=False)
+        self.assertEqual([app["id"] for app in select([spotify, recent_side_store])], ["spotify"])
+        self.assertEqual([app["id"] for app in select([inactive_spotify, side_store])], ["sidestore"])
+        self.assertEqual([app["id"] for app in select([spotify, side_store])], ["spotify", "sidestore"])
+        self.assertEqual(select([inactive_spotify, recent_side_store]), [])
+        self.assertEqual([app["id"] for app in select([spotify, dict(spotify, id="other"), side_store])],
+                         ["spotify", "other", "sidestore"])
+        self.assertEqual(select([recent_side_store]), [])
+        self.assertNotIn("fetchAppsForRefreshingAll(in: context)", source)
+
     @unittest.skipUnless(SWIFTC, "Swift compiler required")
     def test_schedule_dates(self):
         with tempfile.TemporaryDirectory() as directory:

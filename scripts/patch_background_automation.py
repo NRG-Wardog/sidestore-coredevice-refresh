@@ -132,6 +132,8 @@ enum AutomaticRefreshSchedule
     static let minutesKey = "automaticRefreshMinutes"
     static let pendingKey = "automaticRefreshPendingDate"
     static let configurationKey = "automaticRefreshPendingConfiguration"
+    static let selfRefreshPendingKey = "automaticRefreshSideStoreSelfRefreshPending"
+    static let selfRefreshRunKey = "automaticRefreshSideStoreSelfRefreshRunID"
 
     static func diagnosticDate(_ date: Date, timeZone: TimeZone) -> String {
         let formatter = ISO8601DateFormatter()
@@ -627,6 +629,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         let timeZone = TimeZone.autoupdatingCurrent
         let utc = TimeZone(secondsFromGMT: 0) ?? timeZone
         let delay = scheduledDate.map {{ taskActualStart.timeIntervalSince($0) }}
+        debugLog("[AUTO_REFRESH] TASK_TRIGGERED source=bgprocessing task_actual_start_local=\\(AutomaticRefreshSchedule.diagnosticDate(taskActualStart, timeZone: timeZone)) task_actual_start_utc=\\(AutomaticRefreshSchedule.diagnosticDate(taskActualStart, timeZone: utc)) delay_from_earliest_begin_seconds=\\(delay.map {{ String(format: \"%.0f\", $0) }} ?? \"unknown\")")
         debugLog("[AUTO_REFRESH] TRIGGER source=bgprocessing task_actual_start_local=\\(AutomaticRefreshSchedule.diagnosticDate(taskActualStart, timeZone: timeZone)) task_actual_start_utc=\\(AutomaticRefreshSchedule.diagnosticDate(taskActualStart, timeZone: utc)) delay_from_earliest_begin_seconds=\\(delay.map {{ String(format: \"%.0f\", $0) }} ?? \"unknown\")")
         UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.pendingKey)
         self.scheduleAutomaticRefresh(replacePending: true)
@@ -688,29 +691,55 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
                 let timeZone = TimeZone.autoupdatingCurrent
                 let utc = TimeZone(secondsFromGMT: 0) ?? timeZone
                 let allApps = InstalledApp.all(in: context)
-                let eligibleApps = InstalledApp.fetchAppsForBackgroundRefresh(in: context)
-                let eligibleIDs = Set(eligibleApps.map {{ $0.bundleIdentifier }})
+                if let marker = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.selfRefreshPendingKey) as? Date {{
+                    if let sideStore = InstalledApp.fetchAltStore(in: context), sideStore.refreshedDate >= marker {{
+                        UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.selfRefreshPendingKey)
+                        UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.selfRefreshRunKey)
+                        debugLog("[AUTO_REFRESH] SIDESTORE_REFRESH_RECOVERY result=confirmed")
+                    }} else {{
+                        debugLog("[AUTO_REFRESH] SIDESTORE_REFRESH_RECOVERY result=pending")
+                    }}
+                }}
+                let upstreamEligibleApps = InstalledApp.fetchAppsForBackgroundRefresh(in: context)
+                let upstreamEligibleIDs = Set(upstreamEligibleApps.map {{ $0.bundleIdentifier }})
+                let sideStore = InstalledApp.fetchAltStore(in: context)
+                let sideStoreID = StoreApp.altstoreAppID
+                var eligibleApps = upstreamEligibleApps.filter {{ $0.bundleIdentifier != sideStoreID }}
 
                 for app in allApps {{
-                    let isSideStore = app.bundleIdentifier == StoreApp.altstoreAppID
+                    let isSideStore = app.bundleIdentifier == sideStoreID
                     let oldEnough = app.refreshedDate < threshold
                     let pledgeEligible = app.storeApp == nil || !app.storeApp!.isPledgeRequired || app.storeApp!.isPledged
-                    let activeEligible = isSideStore || app.isActive
-                    let eligible = eligibleIDs.contains(app.bundleIdentifier)
+                    let activeEligible = app.isActive
+                    let upstreamEligible = upstreamEligibleIDs.contains(app.bundleIdentifier)
+                    let sideStoreEligible = isSideStore && activeEligible && oldEnough && pledgeEligible
+                    let eligible = isSideStore ? sideStoreEligible : upstreamEligible
                     let reason: String
                     if eligible {{ reason = \"eligible\" }}
                     else if !oldEnough {{ reason = \"refreshed_less_than_6h_ago\" }}
                     else if !activeEligible {{ reason = \"inactive\" }}
                     else if !pledgeEligible {{ reason = \"pledge_required\" }}
-                    else if isSideStore {{ reason = \"sidestore_special_case_excluded\" }}
+                    else if isSideStore {{ reason = \"sidestore_not_eligible\" }}
                     else {{ reason = \"predicate_excluded\" }}
                     let age = now.timeIntervalSince(app.refreshedDate)
-                    debugLog(\"[AUTO_REFRESH] APP bundle=\\(app.bundleIdentifier) last_refresh_local=\\(AutomaticRefreshSchedule.diagnosticDate(app.refreshedDate, timeZone: timeZone)) last_refresh_utc=\\(AutomaticRefreshSchedule.diagnosticDate(app.refreshedDate, timeZone: utc)) age_seconds=\\(String(Int(age))) eligible=\\(eligible) reason=\\(reason)\")
+                    let ageHours = String(format: "%.2f", age / 3600)
+                    let storeAppName = app.storeApp == nil ? \"none\" : \"present\"
+                    let pledgeRequired = app.storeApp?.isPledgeRequired ?? false
+                    let pledged = app.storeApp?.isPledged ?? false
+                    debugLog(\"[AUTO_REFRESH] APP_DIAGNOSTIC bundle_id=\\(app.bundleIdentifier) name=\\(app.name) is_active=\\(app.isActive) is_sidestore=\\(isSideStore) last_refresh=\\(AutomaticRefreshSchedule.diagnosticDate(app.refreshedDate, timeZone: timeZone)) age_hours=\\(ageHours) passes_age_check=\\(oldEnough) store_app=\\(storeAppName) pledge_required=\\(pledgeRequired) pledged=\\(pledged) passes_pledge_check=\\(pledgeEligible) final_eligible=\\(eligible) exclusion_reason=\\(reason)\")
+                    if isSideStore {{
+                        debugLog(\"[AUTO_REFRESH] SIDESTORE_ELIGIBILITY bundle_id=\\(app.bundleIdentifier) is_active=\\(app.isActive) age_hours=\\(ageHours) passes_age_check=\\(oldEnough) passes_pledge_check=\\(pledgeEligible) final_eligible=\\(eligible) exclusion_reason=\\(reason)\")
+                    }}
+                }}
+                if let sideStore, sideStore.isActive,
+                   sideStore.refreshedDate < threshold,
+                   sideStore.storeApp == nil || !sideStore.storeApp!.isPledgeRequired || sideStore.storeApp!.isPledged {{
+                    eligibleApps.append(sideStore)
                 }}
                 return eligibleApps
             }}
             let installedApps = eligibility
-            let includesSideStore = installedApps.contains {{ $0.bundleIdentifier == StoreApp.altstoreAppID }}
+            let includesSideStore = installedApps.last?.bundleIdentifier == StoreApp.altstoreAppID
 
             debugLog("[AUTO_REFRESH] ELIGIBLE_APPS count=\\(installedApps.count) includes_sidestore=\\(includesSideStore)")
             guard !installedApps.isEmpty else
@@ -722,6 +751,14 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
 
             do
             {{
+                for app in installedApps {{
+                    debugLog("[AUTO_REFRESH] REFRESH_ATTEMPT_STARTED bundle_id=\\(app.bundleIdentifier) is_sidestore=\\(app.bundleIdentifier == StoreApp.altstoreAppID)")
+                }}
+                if includesSideStore {{
+                    UserDefaults.standard.set(Date(), forKey: AutomaticRefreshSchedule.selfRefreshPendingKey)
+                    UserDefaults.standard.set(state.runID.uuidString, forKey: AutomaticRefreshSchedule.selfRefreshRunKey)
+                    debugLog("[AUTO_REFRESH] SIDESTORE_REFRESH_ATTEMPT_STARTED bundle_id=\\(StoreApp.altstoreAppID) durable_marker=true")
+                }}
                 let operation = try AppManager.shared.backgroundRefresh(
                     installedApps,
                     presentsNotifications: true
@@ -745,8 +782,16 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
                             switch nestedResult {{
                             case .success:
                                 debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=success")
+                                if bundleIdentifier == StoreApp.altstoreAppID {{
+                                    UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.selfRefreshPendingKey)
+                                    UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.selfRefreshRunKey)
+                                    debugLog("[AUTO_REFRESH] SIDESTORE_REFRESH_RESULT result=success")
+                                }}
                             case .failure(let error):
                                 debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=failure error=\\(error.localizedDescription)")
+                                if bundleIdentifier == StoreApp.altstoreAppID {{
+                                    debugLog("[AUTO_REFRESH] SIDESTORE_REFRESH_RESULT result=failure error=\\(error.localizedDescription)")
+                                }}
                             }}
                         }}
                     case .failure(let error):
@@ -765,6 +810,11 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
             }}
             catch
             {{
+                if includesSideStore {{
+                    UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.selfRefreshPendingKey)
+                    UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.selfRefreshRunKey)
+                    debugLog("[AUTO_REFRESH] SIDESTORE_REFRESH_RESULT result=not_started error=\\(error.localizedDescription)")
+                }}
                 debugLog("[AUTO_REFRESH] OPERATION_START_FAIL error=\\(error.localizedDescription)")
                 state.finish(success: false, detail: error.localizedDescription)
             }}
