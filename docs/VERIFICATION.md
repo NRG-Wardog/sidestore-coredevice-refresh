@@ -55,18 +55,28 @@ material.
 
 ## Current release IPA
 
-The public v1.0.0 IPA is 27,555,473 bytes with SHA-256:
+The public **v1.0.1** IPA is **27,556,060 bytes** with SHA-256:
 
 ```text
-ce675097ab87d93073c0fd807ad6c2c574452b8c099c831742b0c004d6dd1d21
+ec0fe6109abd92326bda695aafc95c2e19d6e8bd96e912f0030acf46e72dedd4
 ```
 
-The local `new.ipa` used for verification matches this hash.
+Release provenance:
+
+```text
+builder_commit=395d21310dd4a9d0ba71a46739ff5c1d47a862bf
+GitHub Actions run=34035803756
+verification=PASS
+```
+
+The GitHub release publishes the IPA together with `SHA256SUMS.txt` and
+`current-verification.txt`. GitHub's release asset digest for the IPA matches
+the SHA-256 above.
 
 ## Refresh history build
 
 Builder commit `12c9ffb6f906000f8ad87ce820e64600f71ffc97` passed
-[Actions run 33984781809](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/runs/33984781809).
+[Actions run 33984781809](https://github.com/NRG-Wardog/sidestore-auto-refresh/actions/runs/33984781809).
 It adds persisted history with **Manual** and **Scheduled** source labels,
 manual refresh results, and a local start-alert request for native scheduled
 tasks. All eight local tests passed before dispatch. The macOS repository
@@ -84,7 +94,7 @@ and manual-result strings in the executable.
 
 The configurable Refresh Schedule UI was built successfully from builder
 commit `63f1c0d148c999ae7e93546582c3f65968223642` in
-[Actions run 33972557213](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/runs/33972557213).
+[Actions run 33972557213](https://github.com/NRG-Wardog/sidestore-auto-refresh/actions/runs/33972557213).
 All seven local tests passed, including generated Swift date and scheduler
 tests and patch idempotence against the pinned source. The macOS runner also
 passed a SwiftUI type check, transport tests, the full iOS build, and IPA
@@ -100,7 +110,7 @@ Its executable contains the schedule screen and preference keys.
 
 Weekly scheduling was added in builder commit
 `7e2384709f7beebd87890b6beaf5497dd2310c63` and built successfully in
-[Actions run 33980149032](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/runs/33980149032).
+[Actions run 33980149032](https://github.com/NRG-Wardog/sidestore-auto-refresh/actions/runs/33980149032).
 The same local and macOS checks passed, with additional cases for weekly
 rollover, weekday changes, legacy daily preferences, and daylight-saving
 transitions. The verified IPA is 27,530,865 bytes with SHA-256:

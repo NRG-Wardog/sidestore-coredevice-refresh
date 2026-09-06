@@ -16,17 +16,25 @@ Additional device/iOS/network compatibility reports are welcome. See [`docs/COMP
 
 ### Prebuilt IPA — recommended
 
-**[Download SideStore CoreDevice Auto-Refresh v1.0.0](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.0/SideStore-CoreDevice-AutoRefresh-v1.0.0.ipa)**
+**[Download SideStore CoreDevice Auto-Refresh v1.0.1](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.1/SideStore-CoreDevice-AutoRefresh-v1.0.1.ipa)**
 
-Release page: **[v1.0.0](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/tag/v1.0.0)**
+Latest release: **[v1.0.1](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/latest)**
 
 SHA-256:
 
 ```text
-CE675097AB87D93073C0FD807AD6C2C574452B8C099C831742B0C004D6DD1D21
+EC0FE6109ABD92326BDA695AAFC95C2E19D6E8BD96E912F0030ACF46E72DEDD4
 ```
 
-The release also includes [`SHA256SUMS.txt`](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.0/SHA256SUMS.txt) for integrity verification.
+Release provenance:
+
+```text
+builder_commit=395d21310dd4a9d0ba71a46739ff5c1d47a862bf
+GitHub Actions run=34035803756
+verification=PASS
+```
+
+The release also includes [`SHA256SUMS.txt`](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.1/SHA256SUMS.txt) and [`current-verification.txt`](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.1/current-verification.txt) for integrity and build-provenance verification.
 
 > Install the IPA **over your existing SideStore installation**. Do not delete SideStore first; replacing it preserves pairing data, account state, and the local database used by the refresh path.
 
