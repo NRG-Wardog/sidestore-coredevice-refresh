@@ -1,13 +1,13 @@
 name: Device verification
-description: Report a successful or failed real-device CoreDevice / refresh test
+description: Report a successful or failed real-device CoreDevice / refresh compatibility test
 title: "[Device]: "
 body:
   - type: markdown
     attributes:
       value: |
-        Real-device results are especially valuable. The key open milestone is a native scheduled refresh completing successfully while the PC is disconnected.
+        The current proof device has completed a full PC-free scheduled refresh. Additional real-device reports are used to map compatibility across iPhone/iPad models, iOS versions, and Wi-Fi network ranges.
 
-        Do not upload pairing files, private keys, Apple credentials, signed personal IPAs, or unredacted private device logs.
+        Do not upload pairing files, private keys, Apple credentials, signed personal IPAs, exact private network addresses if you do not want to disclose them, or unredacted private device logs.
 
   - type: input
     id: device
@@ -26,6 +26,32 @@ body:
       required: true
 
   - type: dropdown
+    id: network_family
+    attributes:
+      label: Wi-Fi IPv4 network family
+      description: Exact private IP addresses are not needed.
+      options:
+        - 10.x private range
+        - 192.168.x private range
+        - 172.16-31.x private range
+        - Other IPv4 range
+        - Prefer not to disclose
+    validations:
+      required: true
+
+  - type: dropdown
+    id: localdevvpn_route
+    attributes:
+      label: LocalDevVPN same-subnet /32 configuration
+      options:
+        - Configured and connected
+        - Configured but LocalDevVPN would not stay connected
+        - Could not configure successfully
+        - Not tested
+    validations:
+      required: true
+
+  - type: dropdown
     id: manual
     attributes:
       label: Manual Refresh All over CoreDevice
@@ -39,7 +65,7 @@ body:
   - type: dropdown
     id: pc
     attributes:
-      label: Was the PC disconnected during the scheduled test?
+      label: Was the PC/USB disconnected during the scheduled test?
       options:
         - Yes
         - No
@@ -63,14 +89,14 @@ body:
     id: markers
     attributes:
       label: Non-sensitive evidence
-      description: Paste the relevant redacted markers. A full autonomous success should include TRIGGER, AUTH_PREFLIGHT_PASS, OPERATION_START, and COMPLETE success=true.
+      description: For a full autonomous success, include the relevant redacted TRIGGER, AUTH_PREFLIGHT_PASS, OPERATION_START, and COMPLETE success=true markers.
       render: text
 
   - type: textarea
     id: notes
     attributes:
       label: Notes
-      description: Include LocalDevVPN behavior, refreshed apps, expiration-date result, and anything unusual.
+      description: Include LocalDevVPN behavior, refreshed apps, expiration-date result, route/setup observations, and anything unusual.
 
   - type: checkboxes
     id: privacy
