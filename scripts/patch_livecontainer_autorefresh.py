@@ -73,6 +73,14 @@ private enum LiveContainerAutoRefreshScheduler {{
         defaults.set(Date(), forKey: lastDateKey)
     }}
 
+    private static func performRefresh() async throws {{
+        guard #available(iOS 17.0, *) else {{
+            throw NSError(domain: "LiveContainerRefresh", code: 17,
+                userInfo: [NSLocalizedDescriptionKey: "Embedded SideStore refresh requires iOS 17 or newer"])
+        }}
+        try await LiveContainerRefreshBridge.refreshAllApps()
+    }}
+
     static func register() {{
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) {{ task in
             guard let task = task as? BGProcessingTask else {{ return }}
@@ -80,7 +88,7 @@ private enum LiveContainerAutoRefreshScheduler {{
                 defer {{ schedule() }}
                 do {{
                     print("[LIVE_CONTAINER_REFRESH] TASK_START")
-                    try await LiveContainerRefreshBridge.refreshAllApps()
+                    try await performRefresh()
                     record(source: "scheduled", result: "success")
                     print("[LIVE_CONTAINER_REFRESH] TASK_COMPLETE success=true")
                     task.setTaskCompleted(success: true)
@@ -104,7 +112,7 @@ private enum LiveContainerAutoRefreshScheduler {{
         Task {{
             do {{
                 print("[LIVE_CONTAINER_REFRESH] MANUAL_START")
-                try await LiveContainerRefreshBridge.refreshAllApps()
+                try await performRefresh()
                 record(source: "manual", result: "success")
                 print("[LIVE_CONTAINER_REFRESH] MANUAL_COMPLETE success=true")
             }} catch {{
