@@ -36,9 +36,18 @@ class RepositoryTests(unittest.TestCase):
         for name in REQUIRED_SCRIPTS:
             path = SCRIPTS / name
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        self.assertIn("if MARKER in text", (SCRIPTS / "patch_background_automation.py").read_text())
-        self.assertIn("if MARKER in text", (SCRIPTS / "patch_coredevice_idevice.py").read_text())
-        self.assertIn("if MARKER in text", (SCRIPTS / "patch_sidestore_integration.py").read_text())
+        self.assertIn(
+            "if MARKER in text",
+            (SCRIPTS / "patch_background_automation.py").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "if MARKER in text",
+            (SCRIPTS / "patch_coredevice_idevice.py").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "if MARKER in text",
+            (SCRIPTS / "patch_sidestore_integration.py").read_text(encoding="utf-8"),
+        )
 
     def test_workflow_references_current_scripts(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -60,10 +69,20 @@ class RepositoryTests(unittest.TestCase):
             r"(?i)(pairingFile|rppairing|client\.p12|client_(cert|key)|LockdownDirectDiag|\.der$)",
         )
 
-    def test_local_network_details_are_not_hardcoded_in_public_docs(self):
+    def test_public_docs_do_not_expose_known_private_network_details(self):
+        """Generic RFC1918 examples are allowed; known diagnostic addresses are not."""
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertNotRegex(readme, r"10\.0\.0\.\d+")
-        self.assertNotIn("10.7.0.1", readme)
+        verification = (ROOT / "docs" / "VERIFICATION.md").read_text(encoding="utf-8")
+        public_docs = readme + "\n" + verification
+
+        # These were diagnostic/local addresses and must never leak into public docs.
+        for sensitive_ip in ("10.7.0.1", "10.7.0.2"):
+            self.assertNotIn(sensitive_ip, public_docs)
+
+        # Documentation may intentionally use RFC1918 examples such as
+        # 10.0.0.x or 192.168.1.x to explain same-subnet LocalDevVPN routing.
+        self.assertIn("same subnet", readme)
+        self.assertIn("/32", readme)
 
 
 if __name__ == "__main__":
