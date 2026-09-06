@@ -71,6 +71,7 @@ private enum LiveContainerAutoRefreshScheduler {{
         defaults.set(Array(history.prefix(50)), forKey: historyKey)
         defaults.set(result, forKey: lastResultKey)
         defaults.set(Date(), forKey: lastDateKey)
+        NotificationCenter.default.post(name: Notification.Name("LiveContainerAutoRefreshHistoryChanged"), object: nil)
     }}
 
     private static func performRefresh() async throws {{
@@ -239,7 +240,10 @@ struct LCEmbeddedSideStoreRefreshView: View {
             }
         }
         .navigationTitle("SideStore refresh")
-        .onAppear { history = defaults.array(forKey: "liveContainerAutoRefreshHistory") as? [[String: String]] ?? [] }
+        .onAppear { reloadHistory() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("LiveContainerAutoRefreshHistoryChanged"))) { _ in
+            reloadHistory()
+        }
     }
 
     private func notifyScheduleChanged() {
@@ -248,6 +252,10 @@ struct LCEmbeddedSideStoreRefreshView: View {
 
     private func notifyManualRefresh() {
         NotificationCenter.default.post(name: Notification.Name("LiveContainerAutoRefreshRunNow"), object: nil)
+    }
+
+    private func reloadHistory() {
+        history = defaults.array(forKey: "liveContainerAutoRefreshHistory") as? [[String: String]] ?? []
     }
 }
 '''
