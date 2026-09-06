@@ -206,7 +206,7 @@ Apps signed with a Free Apple Account normally need to be refreshed within Apple
 | Native background-task registration | ✅ Verified |
 | Native background-task scheduling | ✅ Verified |
 | Schedule/history code and IPA build | ✅ CI verified |
-| Full unattended scheduled refresh with PC disconnected | ⏳ Final device proof pending |
+| Full unattended scheduled refresh with PC disconnected | ✅ Final device proof verified|
 
 Tested transport hardware: **iPhone 12 running iOS 26.6.1**.
 
