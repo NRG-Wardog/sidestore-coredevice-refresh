@@ -152,8 +152,9 @@ print("Schedule date tests passed")
             self.assertIn("Preferred Time (Local)", settings)
             self.assertIn("TimeZone.autoupdatingCurrent.identifier", settings)
             app_delegate = (root / "AltStore/AppDelegate.swift").read_text()
-            self.assertIn("Calendar.autoupdatingCurrent", app_delegate)
-            self.assertIn("earliest_utc=", app_delegate)
+            self.assertIn("AutomaticRefreshSchedule.requestDate(after: Date(), replacePending: replacePending)", app_delegate)
+            self.assertIn("request.earliestBeginDate = nextDate", app_delegate)
+            self.assertIn("scheduled_utc=", app_delegate)
             if SWIFTC:
                 for name in FILES:
                     if name.endswith(".swift"):
@@ -493,7 +494,7 @@ precondition(UNUserNotificationCenter.shared.requests.count == 1)
 let alert = UNUserNotificationCenter.shared.requests[0]
 precondition(alert.trigger == nil)
 precondition(alert.content.sound != nil)
-precondition(alert.content.title == "SideStore refresh started")
+precondition(alert.content.title == "Scheduled refresh started")
 precondition(AutomaticRefreshHistory.load().first!.event == .started)
 UNUserNotificationCenter.shared.fail = true
 observer.handleAutomaticRefresh(BGProcessingTask())

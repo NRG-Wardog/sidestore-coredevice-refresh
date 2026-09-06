@@ -133,6 +133,19 @@ enum AutomaticRefreshSchedule
     static let pendingKey = "automaticRefreshPendingDate"
     static let configurationKey = "automaticRefreshPendingConfiguration"
 
+    static func diagnosticDate(_ date: Date, timeZone: TimeZone) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = timeZone
+        return formatter.string(from: date)
+    }
+
+    static func selectedLocalTime(defaults: UserDefaults = .standard) -> String {
+        guard frequency(defaults: defaults) != "interval" else { return "interval" }
+        let value = (0..<1440).contains(defaults.object(forKey: minutesKey) as? Int ?? -1)
+            ? defaults.integer(forKey: minutesKey) : 600
+        return String(format: "%02d:%02d", value / 60, value % 60)
+    }
+
     static func frequency(defaults: UserDefaults = .standard) -> String {
         if let saved = defaults.string(forKey: frequencyKey),
            ["interval", "daily", "weekly"].contains(saved) { return saved }
@@ -466,7 +479,9 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         self.operation = nil
         self.lock.unlock()
 
-        AutomaticRefreshHistory.record(event ?? (success ? .completed : .failed), runID: self.runID, detail: detail)
+        let finalEvent = event ?? (success ? .completed : .failed)
+        debugLog("[AUTO_REFRESH] TASK_COMPLETE success=\(success) event=\(finalEvent.rawValue) detail=\(detail)")
+        AutomaticRefreshHistory.record(finalEvent, runID: self.runID, detail: detail)
         if cancelOperation { operation?.cancel() }
         self.task.expirationHandler = nil
         self.task.setTaskCompleted(success: success)
@@ -575,10 +590,7 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         }}
 
         // Preserve an already eligible request when the app enters the background again.
-        var localCalendar = Calendar.autoupdatingCurrent
-        localCalendar.timeZone = TimeZone.autoupdatingCurrent
-        let nextDate = AutomaticRefreshSchedule.requestDate(after: Date(), replacePending: replacePending,
-                                                             calendar: localCalendar)
+        let nextDate = AutomaticRefreshSchedule.requestDate(after: Date(), replacePending: replacePending)
         let previousDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
         let request = BGProcessingTaskRequest(identifier: Self.automaticRefreshTaskIdentifier)
         request.earliestBeginDate = nextDate
@@ -589,11 +601,13 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
         {{
             try BGTaskScheduler.shared.submit(request)
             UserDefaults.standard.set(nextDate, forKey: "automaticRefreshPendingDate")
-            UserDefaults.standard.set(AutomaticRefreshSchedule.configuration(calendar: localCalendar), forKey: AutomaticRefreshSchedule.configurationKey)
+            UserDefaults.standard.set(AutomaticRefreshSchedule.configuration(), forKey: AutomaticRefreshSchedule.configurationKey)
             if previousDate != nextDate || !AutomaticRefreshHistory.load().contains(where: {{ $0.event == .scheduled && $0.eligibleDate == nextDate }}) {{
                 AutomaticRefreshHistory.record(.scheduled, eligibleDate: nextDate)
             }}
-            debugLog("[AUTO_REFRESH] SCHEDULE_PASS local=\\(nextDate.formatted(date: .abbreviated, time: .shortened)) timezone=\\(localCalendar.timeZone.identifier) earliest_utc=\\(nextDate) network_required=true external_power_required=false")
+            let timeZone = TimeZone.autoupdatingCurrent
+            let offset = timeZone.secondsFromGMT(for: nextDate)
+            debugLog("[AUTO_REFRESH] SCHEDULE_PASS selected_local_time=\\(AutomaticRefreshSchedule.selectedLocalTime()) timezone=\\(timeZone.identifier) gmt_offset_seconds=\\(offset) scheduled_absolute_date=\\(nextDate.timeIntervalSince1970) scheduled_local=\\(AutomaticRefreshSchedule.diagnosticDate(nextDate, timeZone: timeZone)) scheduled_utc=\\(AutomaticRefreshSchedule.diagnosticDate(nextDate, timeZone: TimeZone(secondsFromGMT: 0) ?? timeZone)) network_required=true external_power_required=false")
         }}
         catch
         {{
@@ -608,7 +622,12 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
     #if !os(tvOS)
     private func handleAutomaticRefresh(_ task: BGProcessingTask)
     {{
-        debugLog("[AUTO_REFRESH] TRIGGER source=bgprocessing")
+        let taskActualStart = Date()
+        let scheduledDate = UserDefaults.standard.object(forKey: AutomaticRefreshSchedule.pendingKey) as? Date
+        let timeZone = TimeZone.autoupdatingCurrent
+        let utc = TimeZone(secondsFromGMT: 0) ?? timeZone
+        let delay = scheduledDate.map {{ taskActualStart.timeIntervalSince($0) }}
+        debugLog("[AUTO_REFRESH] TRIGGER source=bgprocessing task_actual_start_local=\\(AutomaticRefreshSchedule.diagnosticDate(taskActualStart, timeZone: timeZone)) task_actual_start_utc=\\(AutomaticRefreshSchedule.diagnosticDate(taskActualStart, timeZone: utc)) delay_from_earliest_begin_seconds=\\(delay.map {{ String(format: \"%.0f\", $0) }} ?? \"unknown\")")
         UserDefaults.standard.removeObject(forKey: AutomaticRefreshSchedule.pendingKey)
         self.scheduleAutomaticRefresh(replacePending: true)
 
@@ -644,8 +663,8 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
     private func notifyAutomaticRefreshStarted(runID: UUID)
     {{
         let content = UNMutableNotificationContent()
-        content.title = "SideStore refresh started"
-        content.body = "iOS has started your scheduled background refresh."
+        content.title = "Scheduled refresh started"
+        content.body = "The task started. App eligibility and refresh results are still pending."
         content.sound = .default
         let request = UNNotificationRequest(identifier: "automatic-refresh-start-" + runID.uuidString,
                                             content: content, trigger: nil)
@@ -663,12 +682,35 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
             guard !state.isFinished else {{ return }}
 
             let context = DatabaseManager.shared.persistentContainer.newBackgroundContext()
-            let installedApps = context.performAndWait {{
-                InstalledApp.fetchAppsForBackgroundRefresh(in: context)
+            let eligibility = context.performAndWait {{
+                let now = Date()
+                let threshold = now.addingTimeInterval(-6 * 60 * 60)
+                let timeZone = TimeZone.autoupdatingCurrent
+                let utc = TimeZone(secondsFromGMT: 0) ?? timeZone
+                let allApps = InstalledApp.all(in: context)
+                let eligibleApps = InstalledApp.fetchAppsForBackgroundRefresh(in: context)
+                let eligibleIDs = Set(eligibleApps.map {{ $0.bundleIdentifier }})
+
+                for app in allApps {{
+                    let isSideStore = app.bundleIdentifier == StoreApp.altStoreAppID
+                    let oldEnough = app.refreshedDate < threshold
+                    let pledgeEligible = app.storeApp == nil || !app.storeApp!.isPledgeRequired || app.storeApp!.isPledged
+                    let activeEligible = isSideStore || app.isActive
+                    let eligible = eligibleIDs.contains(app.bundleIdentifier)
+                    let reason: String
+                    if eligible {{ reason = \"eligible\" }}
+                    else if !oldEnough {{ reason = \"refreshed_less_than_6h_ago\" }}
+                    else if !activeEligible {{ reason = \"inactive\" }}
+                    else if !pledgeEligible {{ reason = \"pledge_required\" }}
+                    else if isSideStore {{ reason = \"sidestore_special_case_excluded\" }}
+                    else {{ reason = \"predicate_excluded\" }}
+                    let age = now.timeIntervalSince(app.refreshedDate)
+                    debugLog(\"[AUTO_REFRESH] APP bundle=\\(app.bundleIdentifier) last_refresh_local=\\(AutomaticRefreshSchedule.diagnosticDate(app.refreshedDate, timeZone: timeZone)) last_refresh_utc=\\(AutomaticRefreshSchedule.diagnosticDate(app.refreshedDate, timeZone: utc)) age_seconds=\\(String(Int(age))) eligible=\\(eligible) reason=\\(reason)\")
+                }}
+                return eligibleApps
             }}
-            let includesSideStore = context.performAndWait {{
-                installedApps.contains {{ $0.bundleIdentifier == StoreApp.altstoreAppID }}
-            }}
+            let installedApps = eligibility
+            let includesSideStore = installedApps.contains {{ $0.bundleIdentifier == StoreApp.altstoreAppID }}
 
             debugLog("[AUTO_REFRESH] ELIGIBLE_APPS count=\\(installedApps.count) includes_sidestore=\\(includesSideStore)")
             guard !installedApps.isEmpty else
@@ -705,13 +747,21 @@ private final class AutomaticRefreshTaskState: @unchecked Sendable
                         failureDetail = error.localizedDescription
                     }}
 
-                    debugLog("[AUTO_REFRESH] COMPLETE success=\\(success) result_count=\\(resultCount)")
+                for (bundleIdentifier, nestedResult) in results.sorted(by: {{ $0.key < $1.key }}) {{
+                    switch nestedResult {{
+                    case .success:
+                        debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=success")
+                    case .failure(let error):
+                        debugLog("[AUTO_REFRESH] REFRESH_RESULT app=\\(bundleIdentifier) result=failure error=\\(error.localizedDescription)")
+                    }}
+                }}
+                debugLog("[AUTO_REFRESH] REFRESH_COMPLETE success=\\(success) result_count=\\(resultCount)")
                     state.finish(success: success,
                         event: success && resultCount == 0 ? .skipped : nil,
                         detail: success ? "Apps refreshed: \\(resultCount)" : failureDetail)
                 }}
                 state.attach(operation: operation)
-                debugLog("[AUTO_REFRESH] OPERATION_START")
+                debugLog("[AUTO_REFRESH] REFRESH_ATTEMPT_STARTED app_count=\\(installedApps.count)")
             }}
             catch
             {{
@@ -773,6 +823,13 @@ def verify_app_delegate(text: str) -> None:
         "requiresExternalPower = false",
         "await self.bootTask?.value",
         "InstalledApp.fetchAppsForBackgroundRefresh",
+        "selected_local_time=",
+        "task_actual_start_local=",
+        "delay_from_earliest_begin_seconds=",
+        "REFRESH_ATTEMPT_STARTED",
+        "REFRESH_RESULT",
+        "TASK_COMPLETE",
+        "The task started. App eligibility and refresh results are still pending.",
         "state.attach(operation: operation)",
         "[AUTO_REFRESH] EXPIRED",
         "operation?.cancel()",
