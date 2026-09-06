@@ -1,6 +1,7 @@
 # SideStore Auto-Refresh — On-Device, No PC at Runtime
 
-[![Build Current SideStore](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/workflows/build-current.yml/badge.svg)](https://github.com/NRG-Wardog/sidestore-coredevice-refresh/actions/workflows/build-current.yml)
+[![Build Current SideStore](https://github.com/NRG-Wardog/sidestore-auto-refresh/actions/workflows/build-current.yml/badge.svg)](https://github.com/NRG-Wardog/sidestore-auto-refresh/actions/workflows/build-current.yml)
+[![Release](https://img.shields.io/github/v/release/NRG-Wardog/sidestore-auto-refresh)](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Keep **SideStore and up to two personally signed iOS apps refreshed directly from the iPhone** with a Free Apple Account, the official App Store **LocalDevVPN**, and Apple's CoreDevice stack.
@@ -8,6 +9,42 @@ Keep **SideStore and up to two personally signed iOS apps refreshed directly fro
 The intended refresh runtime does **not** require a PC, USB connection, relay server, jailbreak, paid Apple Developer account, custom NetworkExtension, or custom VPN app.
 
 > **Current proof status:** same-device CoreDevice transport, IPA staging/install, manual `Refresh All`, and native iOS background-task registration/scheduling are verified. The final proof milestone is a real iOS-scheduled refresh completing successfully while the PC is disconnected.
+
+## Download
+
+### Prebuilt IPA — recommended
+
+**[Download SideStore CoreDevice Auto-Refresh v1.0.0](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.0/SideStore-CoreDevice-AutoRefresh-v1.0.0.ipa)**
+
+Release page: **[v1.0.0](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/tag/v1.0.0)**
+
+SHA-256:
+
+```text
+CE675097AB87D93073C0FD807AD6C2C574452B8C099C831742B0C004D6DD1D21
+```
+
+The release also includes [`SHA256SUMS.txt`](https://github.com/NRG-Wardog/sidestore-auto-refresh/releases/download/v1.0.0/SHA256SUMS.txt) for integrity verification.
+
+> Install the IPA **over your existing SideStore installation**. Do not delete SideStore first; replacing it preserves pairing data, account state, and the local database used by the refresh path.
+
+Prefer to inspect and reproduce the build yourself? See [Build it yourself](#build-it-yourself).
+
+## Quick start
+
+1. Download the prebuilt IPA above.
+2. Install it **over your existing SideStore** using your development installer.
+3. Open SideStore once.
+4. Keep the official **LocalDevVPN** connected.
+5. Keep **Developer Mode** enabled.
+6. Enable **Background App Refresh** in iOS.
+7. Keep the device on **Wi-Fi**.
+8. In SideStore, open **Settings → Refreshing Apps → Refresh Schedule**.
+9. Choose Every Six Hours, Daily, or Weekly.
+
+Weekly scheduling leaves little safety margin before free-account apps expire, and iOS may delay background execution. Six-hour or daily scheduling is safer.
+
+> iOS decides when a `BGProcessingTask` actually runs. A selected time is an earliest eligible time, not a guaranteed alarm.
 
 ## Why this exists
 
@@ -44,61 +81,6 @@ Tested transport hardware: **iPhone 12 running iOS 26.6.1**.
 The latest verified manual `Refresh All` refreshed Spotify and SideStore successfully over the CoreDevice transport in **18.571 seconds**.
 
 See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the exact evidence, build hashes, device markers, and remaining proof requirements.
-
-## Quick start
-
-### 1. Fork this repository
-
-GitHub only allows repository collaborators to manually run Actions on this repository. If you are not a collaborator, **fork the repository to your own GitHub account** first.
-
-### 2. Run the builder
-
-In your fork:
-
-1. Open **Actions**.
-2. Enable Actions for the fork if GitHub asks.
-3. Select **Build Current SideStore**.
-4. Click **Run workflow** on `main`.
-5. Wait for the build to finish successfully.
-6. Open the completed workflow run.
-7. Download the `SideStore-v30-background-automation` artifact.
-8. Extract the ZIP and use the included `SideStore.ipa`.
-
-Workflow source: [`.github/workflows/build-current.yml`](.github/workflows/build-current.yml)
-
-### 3. Install over your existing SideStore
-
-Install the generated IPA **over the existing SideStore installation** using your development installer.
-
-Do **not** delete SideStore first. Replacing the existing installation preserves pairing data, account state, and the local database required by the refresh path.
-
-### 4. Prepare the iPhone
-
-After installation:
-
-- Open SideStore once.
-- Keep the official **LocalDevVPN** connected.
-- Keep **Developer Mode** enabled.
-- Enable **Background App Refresh** in iOS.
-- Keep the device on **Wi-Fi**.
-- Use a valid Lockdown pairing file.
-- Use the tested same-subnet `/32` LocalDevVPN topology.
-
-### 5. Configure refresh scheduling
-
-In SideStore:
-
-**Settings → Refreshing Apps → Refresh Schedule**
-
-Choose one of the available schedules:
-
-- Every Six Hours
-- Daily at a preferred local time
-- Weekly on a selected weekday/time
-
-Weekly scheduling leaves little safety margin before free-account apps expire, and iOS may delay background execution. Six-hour or daily scheduling is safer.
-
-> iOS decides when a `BGProcessingTask` actually runs. A scheduled time is an earliest eligible time, not a guaranteed alarm.
 
 ## Requirements
 
@@ -223,7 +205,20 @@ A local notification with sound is requested when iOS actually starts an enabled
 
 History starts with installation of this feature and does not reconstruct old runs from previous logs.
 
-## Reproducible build
+## Build it yourself
+
+The public GitHub Actions workflow reproduces the prebuilt IPA from pinned upstream revisions.
+
+1. Fork this repository to your GitHub account.
+2. Open **Actions** in your fork.
+3. Enable Actions if GitHub asks.
+4. Select **Build Current SideStore**.
+5. Click **Run workflow** on `main`.
+6. Open the successful run.
+7. Download the `SideStore-v30-background-automation` artifact.
+8. Extract the ZIP and use `SideStore.ipa`.
+
+Workflow source: [`.github/workflows/build-current.yml`](.github/workflows/build-current.yml)
 
 The workflow currently pins these revisions:
 
