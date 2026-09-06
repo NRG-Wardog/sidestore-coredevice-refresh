@@ -30,6 +30,9 @@ class LiveContainerPatchTests(unittest.TestCase):
             "SideStoreSupport.framework in Frameworks",
         ):
             self.assertIn(marker, source)
+        workflow = (ROOT / ".github/workflows/livecontainer-build.yml").read_text(encoding="utf-8")
+        self.assertIn("module.patch_console_log", workflow)
+        self.assertIn("LIVE_REFRESH_LOG_RETENTION_V1", workflow)
 
     def test_generated_host_fragments_are_idempotent(self):
         # Exercise the generator's own insertion helpers without requiring an

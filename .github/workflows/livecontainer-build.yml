@@ -42,12 +42,25 @@ jobs:
           set -euo pipefail
           python3 builder/scripts/patch_livecontainer_autorefresh.py work/LiveContainer
           python3 builder/scripts/patch_livecontainer_autorefresh.py work/LiveContainer
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location(
+              "background_patch", "builder/scripts/patch_background_automation.py"
+          )
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.patch_console_log(Path("work/EmbeddedSideStore"))
+          PY
           swiftc -frontend -parse work/LiveContainer/LiveContainerSwiftUI/App/AppDelegate.swift
           swiftc -frontend -parse work/LiveContainer/LiveContainerSwiftUI/Views/Settings/LCEmbeddedSideStoreRefreshView.swift
           swiftc -frontend -parse work/LiveContainer/SideStoreSupport/SideStore.swift
+          swiftc -frontend -parse work/EmbeddedSideStore/SideStore/Utils/iostreams/ConsoleLog.swift
           plutil -extract BGTaskSchedulerPermittedIdentifiers.0 raw work/LiveContainer/LiveContainer/Info.plist
           xcodebuild -list -project work/LiveContainer/LiveContainer.xcodeproj
           xcodebuild -list -project work/EmbeddedSideStore/AltStore.xcodeproj
+          grep -Fq 'LIVE_REFRESH_LOG_RETENTION_V1' work/EmbeddedSideStore/SideStore/Utils/iostreams/ConsoleLog.swift
 
       - name: Build host and embedded SideStore source targets
         shell: bash
