@@ -35,37 +35,85 @@ Prefer to inspect and reproduce the build yourself? See [Build it yourself](#bui
 1. Download the prebuilt IPA above.
 2. Install it **over your existing SideStore** using your development installer.
 3. Open SideStore once.
-4. Keep the official **LocalDevVPN** connected.
-5. Keep **Developer Mode** enabled.
-6. Enable **Background App Refresh** in iOS.
-7. Keep the device on **Wi-Fi**.
-8. In SideStore, open **Settings → Refreshing Apps → Refresh Schedule**.
-9. Choose Every Six Hours, Daily, or Weekly.
+4. Configure **LocalDevVPN for your current Wi-Fi subnet** using the required setup below.
+5. Keep the official **LocalDevVPN** connected.
+6. Keep **Developer Mode** enabled.
+7. Enable **Background App Refresh** in iOS.
+8. Keep the device on **Wi-Fi**.
+9. In SideStore, open **Settings → Refreshing Apps → Refresh Schedule**.
+10. Choose Every Six Hours, Daily, or Weekly.
 
 Weekly scheduling leaves little safety margin before free-account apps expire, and iOS may delay background execution. Six-hour or daily scheduling is safer.
 
 > iOS decides when a `BGProcessingTask` actually runs. A selected time is an earliest eligible time, not a guaranteed alarm.
+
+## Required LocalDevVPN setup
+
+This step is **required** for the current CoreDevice transport path.
+
+The default LocalDevVPN address range should not be left unchanged. Configure LocalDevVPN so its **Tunnel IP** and **Device IP** are two unused IPv4 addresses inside the **same subnet as the iPhone's current Wi-Fi network**, and use `/32` for both addresses.
+
+For example, if the iPhone is connected to a Wi-Fi network in the form:
+
+```text
+192.168.1.x/24
+```
+
+choose two unused addresses from that same subnet, for example:
+
+```text
+Tunnel IP:  192.168.1.240/32
+Device IP:  192.168.1.241/32
+```
+
+Do **not** copy those example addresses blindly. Use two addresses that are unused on your own Wi-Fi subnet.
+
+In the official **LocalDevVPN** app:
+
+1. Open **Settings → Network Configuration**.
+2. Set **Tunnel IP** to the first unused address in your Wi-Fi subnet with `/32`.
+3. Set **Device IP** to a second unused address in the same subnet with `/32`.
+4. Enable **Allow Intermediate Addresses**.
+5. Tap **Done**.
+6. Tap **Save & Apply**.
+7. Connect LocalDevVPN.
+8. Open **Session Details** and verify that the tunnel is using the values you entered.
+
+> If LocalDevVPN shows its original/default addresses again after the warning/confirmation screen, re-enter your custom Tunnel IP and Device IP, then use **Done → Save & Apply → Connect**.
+
+### Important: which address SideStore uses
+
+For CoreDevice/Lockdown traffic, the **Device IP is the peer address**. SideStore must reach the device peer through that address; the Tunnel IP is the local tunnel-side address.
+
+In other words:
+
+```text
+Tunnel IP  -> LocalDevVPN tunnel side
+Device IP  -> iPhone/CoreDevice peer used by SideStore
+```
+
+The current implementation discovers and validates this same-subnet `/32` peer route before opening the CoreDevice transport.
 
 ## Screenshots
 
 <table>
   <tr>
     <td align="center">
-      <img src="docs/screenshots/settings-refreshing-apps.jpg" width="260" alt="SideStore Refreshing Apps settings"><br>
+      <img src="docs/screenshots/settings-refreshing-apps.jpg" width="180" alt="SideStore Refreshing Apps settings"><br>
       <b>Refreshing Apps settings</b>
     </td>
     <td align="center">
-      <img src="docs/screenshots/refresh-schedule-main.jpg" width="260" alt="SideStore Refresh Schedule"><br>
+      <img src="docs/screenshots/refresh-schedule-main.jpg" width="180" alt="SideStore Refresh Schedule"><br>
       <b>Refresh Schedule</b>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="docs/screenshots/refresh-schedule-options.jpg" width="260" alt="Six-hour, daily, and weekly refresh schedule options"><br>
+      <img src="docs/screenshots/refresh-schedule-options.jpg" width="180" alt="Six-hour, daily, and weekly refresh schedule options"><br>
       <b>Six-hour, daily, or weekly</b>
     </td>
     <td align="center">
-      <img src="docs/screenshots/refresh-history.jpg" width="260" alt="SideStore refresh history"><br>
+      <img src="docs/screenshots/refresh-history.jpg" width="180" alt="SideStore refresh history"><br>
       <b>Persistent refresh history</b>
     </td>
   </tr>
