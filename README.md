@@ -198,6 +198,12 @@ The current implementation discovers and validates this same-subnet `/32` peer r
 </p>
 
 <p align="center">
+  <img src="docs/screenshots/refresh-skipped.jpeg" width="240" alt="Refresh Skip">
+  <br>
+  <strong>Siri refresh phrase</strong>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/siri-refresh-phrase.png" width="240" alt="Siri phrase for SideStore refresh">
   <br>
   <strong>Siri refresh phrase</strong>
